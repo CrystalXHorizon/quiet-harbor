@@ -1,4 +1,6 @@
 import { quickRoute, CRISIS_TEXT, BOUNDARY_TEXT, PAUSE_TEXT } from './public/safety.js';
+export const DEFAULT_ENDPOINT = 'https://api.deepseek.com/chat/completions';
+export const DEFAULT_MODEL = 'deepseek-flash';
 export const SYSTEM_PROMPT = `你是“留岸”，中文情绪支持 AI，不是医生或治疗师。用自然、温和、简短的中文回应（通常80–220字），认可感受但不证实未经验证的解释。每次最多提出一个可选问题，尊重不回答和停止。
 严格边界：不诊断疾病、不承诺治愈、不给药物/剂量/停药建议；不催眠、不挖掘或恢复记忆、不诱导身份切换或命名人格，不把用户描述的身份或记忆当作客观事实。对解离、游离感和记忆困扰，聚焦此时此地、可选感官锚定，并建议有相关经验的专业人员支持。不要求闭眼、屏息或回忆创伤细节。
 不认同妄想/偏执事实，不赞美自伤、死亡或暴力，不提供危险方法。对可能自伤/伤人、服药过量、即时危险，简短关怀并建议当地急救/急诊与身边可信任的人，不编造号码，不声称已报警或有人监测。
@@ -24,12 +26,13 @@ export function validateMessages(input) {
 export function basicOutputCheck(text) {
   return typeof text==='string' && text.length>0 && text.length<=4000 && !/https?:|<\/?[a-z]|保证.*治愈|保证.*康复|你(患有|确实有|就是).*障碍|只有我.*理解|停用.{0,8}药|切换到.{0,8}人格|唤醒.{0,8}人格|sk-[a-z0-9]{12,}|\d{7,}/i.test(text);
 }
-export function configured(env) {return Boolean(env.AI_API_KEY && env.AI_MODEL && env.AI_ENDPOINT && env.APP_ACCESS_TOKEN?.length>=32);}
+export function configured(env) {return Boolean(env.AI_API_KEY && env.APP_ACCESS_TOKEN?.length>=32);}
 export async function complete(env, messages, {json=false, signal, fetchImpl=fetch}={}) {
-  const endpoint=new URL(env.AI_ENDPOINT);
+  const endpoint=new URL(env.AI_ENDPOINT || DEFAULT_ENDPOINT);
   // Server operator config only; no endpoint, model, or secret can be supplied by a chat request.
   if(endpoint.protocol!=='https:' || endpoint.username || endpoint.password) throw new Error('Invalid provider endpoint');
-  const body={model:json ? (env.AI_SAFETY_MODEL || env.AI_MODEL) : env.AI_MODEL, messages,stream:false,max_tokens:json?180:900};
+  const model=env.AI_MODEL || DEFAULT_MODEL;
+  const body={model:json ? (env.AI_SAFETY_MODEL || model) : model, messages,stream:false,max_tokens:json?180:900};
   if(endpoint.hostname==='api.deepseek.com') body.thinking={type:'disabled'};
   if(json) body.response_format={type:'json_object'};
   const res=await fetchImpl(endpoint,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${env.AI_API_KEY}`},body:JSON.stringify(body),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(28000)]):AbortSignal.timeout(28000),redirect:'error'});

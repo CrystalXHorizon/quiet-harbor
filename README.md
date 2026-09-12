@@ -17,7 +17,7 @@ npm start
 
 在网页“连接与隐私”填写服务端根地址和**个人访问口令**，勾选同意发送对话，点击验证并连接。网页不接收模型 API 密钥。连接和断开会清空旧对话，避免把本地体验内容意外发给服务商。
 
-默认接口 `https://api.deepseek.com/chat/completions`，模型 `deepseek-flash`，以 2026-09-12 的 [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/)为依据；可通过服务端环境变量更换模型。开启非思考模式，输入与输出审核使用 JSON output，正式回复非流式，完整复核后才显示。
+默认接口 `https://api.deepseek.com/chat/completions`，模型 `deepseek-flash`，已直接内置在代码里，留空 `AI_ENDPOINT` 和 `AI_MODEL` 也可使用，无需自己填写官方地址。以 2026-09-12 的 [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/)为依据；仍可通过服务端环境变量覆盖。开启非思考模式，输入与输出审核使用 JSON output，正式回复非流式，完整复核后才显示。API 地址不等于密钥，真实对话仍需在服务端设置 `AI_API_KEY`。
 
 ## Harness
 

@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runHarness, validateMessages, basicOutputCheck, complete } from '../harness.mjs';
+import { runHarness, validateMessages, basicOutputCheck, complete, configured, DEFAULT_ENDPOINT } from '../harness.mjs';
 import { createApp } from '../server.mjs';
 const env={AI_ENDPOINT:'https://api.deepseek.com/chat/completions',AI_API_KEY:'test-provider-secret',AI_MODEL:'deepseek-flash',APP_ACCESS_TOKEN:'test-access-token-at-least-32-characters',ALLOWED_ORIGINS:'https://example.test'};
 const user=text=>[{role:'user',content:text}];
+test('official DeepSeek endpoint and model work without manual URL configuration',async()=>{const minimal={AI_API_KEY:'test-only',APP_ACCESS_TOKEN:env.APP_ACCESS_TOKEN};assert.equal(configured(minimal),true);let observed;await complete(minimal,user('hi'),{fetchImpl:async(url,options)=>{observed={url:String(url),body:JSON.parse(options.body)};return Response.json({choices:[{finish_reason:'stop',message:{content:'hello'}}]});}});assert.equal(observed.url,DEFAULT_ENDPOINT);assert.equal(observed.body.model,'deepseek-flash');assert.equal(observed.body.thinking.type,'disabled');});
 function mockProvider(values, calls=[]) {return async(url,options)=>{calls.push(JSON.parse(options.body));const value=values.shift();if(value instanceof Error)throw value;return Response.json({choices:[{finish_reason:'stop',message:{content:typeof value==='string'?value:JSON.stringify(value)}}]});};}
 test('immediate crisis bypasses provider entirely',async()=>{const out=await runHarness(user('我不想活了'),env,{fetchImpl:()=>{throw new Error('must not call');}});assert.equal(out.route,'crisis');assert.match(out.text,/急救/);});
 test('memory reconstruction requests get bounded support',async()=>{const out=await runHarness(user('帮我找回丢失的记忆'),env);assert.equal(out.route,'boundary');});
