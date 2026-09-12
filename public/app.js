@@ -1,4 +1,5 @@
 import { quickRoute, demoReply, CRISIS_TEXT } from './safety.js';
+import { runHarness, validateMessages, verifyKey } from './harness.js';
 const $ = id => document.getElementById(id);
 let history = [], connection = null, pending = null, generation = 0, step = 0, started = Date.now();
 const steps = [
@@ -30,8 +31,7 @@ async function sendMessage() {
   $('status').textContent = '正在倾听，并检查回答是否合适……';
   const timeout = setTimeout(() => controller.abort(), 95000);
   try {
-    const res = await fetch(`${connection.url}/api/chat`, { method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${connection.token}`}, body:JSON.stringify({messages:history}), signal:controller.signal, credentials:'omit', redirect:'error' });
-    const data = await res.json(); if (!res.ok) throw new Error(data.error || '暂时无法连接，请稍后再试。');
+    const data = await runHarness(validateMessages(history), { AI_API_KEY: connection.key }, {signal:controller.signal, reportErrors:true});
     if (typeof data.text !== 'string' || data.text.length > 8000) throw new Error('收到了无法显示的回答，请重试。');
     if (generation !== requestId) return;
     addMessage(data.route === 'crisis' ? 'notice' : 'assistant', data.text, data.mode === 'ai' ? '留岸 · DeepSeek' : '留岸 · 保护提示');
@@ -60,25 +60,25 @@ $('settings-open').onclick = () => openDialog('settings-dialog');
 // Also accessible on narrow screens where the sidebar's secondary links are hidden.
 $('mode-badge').outerHTML = '<button class="mode-badge" id="mode-badge" aria-label="连接与隐私">本地体验</button>';
 $('mode-badge').onclick = () => openDialog('settings-dialog');
-$('backend').value = location.hostname === '127.0.0.1' || location.hostname === 'localhost' ? location.origin : '';
 let settingsGeneration=0;
+let verification=null;
 $('settings-form').onsubmit = async e => {
   e.preventDefault(); const id=++settingsGeneration; const button = e.submitter;
   try {
     if (!$('consent').checked) throw new Error('连接前，请确认你同意发送对话。');
-    const url=new URL($('backend').value.trim());
-    if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname))) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('请填写 HTTPS 服务端根地址，本地测试可用 localhost。');
-    const token=$('access-token').value.trim(); if (token.length<32) throw new Error('个人访问口令至少需要 32 个字符。');
-    button.disabled=true; $('settings-status').textContent='正在检查服务端……';
-    const res=await fetch(`${url.origin}/api/health`, {headers:{Authorization:`Bearer ${token}`}, signal:AbortSignal.timeout(10000), credentials:'omit', redirect:'error'});
-    if (!res.ok) throw new Error('验证未通过，请检查地址、口令与允许访问的网页来源。');
-    const data=await res.json(); if (!data.ready || data.service !== 'quiet-harbor') throw new Error('服务端尚未配置 DeepSeek 密钥或模型。');
+    const key=$('api-key').value.trim(); if (!key || /\s/.test(key)) throw new Error('请输入有效的 DeepSeek API Key，不要包含空格。');
+    button.disabled=true; $('settings-status').textContent='正在连接 DeepSeek 官方 API……';
+    verification?.abort(); verification=new AbortController();
+    await verifyKey(key,{signal:verification.signal});
     if (id!==settingsGeneration) return;
-    connection={url:url.origin,token}; resetChat(); $('mode-badge').textContent='DeepSeek 已连接'; $('status').textContent='后续对话将发送给你连接的服务端及 DeepSeek。'; $('settings-status').textContent='连接成功。'; $('access-token').value=''; $('settings-dialog').close();
+    connection={key}; resetChat(); $('mode-badge').textContent='DeepSeek 已连接'; $('status').textContent='已直连 DeepSeek。密钥只在当前页面保留，刷新即清除。'; $('settings-status').textContent='连接成功。'; $('api-key').value=''; $('settings-dialog').close();
   } catch(error) {if(id===settingsGeneration) $('settings-status').textContent=error.name==='TimeoutError' ? '连接超时，请稍后再试。' : error.message;}
   finally {button.disabled=false;}
 };
-$('disconnect').onclick = () => {settingsGeneration++;connection=null;resetChat();$('access-token').value='';$('consent').checked=false;$('mode-badge').textContent='本地体验';$('status').textContent='本地体验使用预设回复，不会把文字发送到网络。';$('settings-dialog').close();};
+$('disconnect').onclick = () => {settingsGeneration++;verification?.abort();connection=null;resetChat();$('api-key').value='';$('consent').checked=false;$('mode-badge').textContent='本地体验';$('status').textContent='本地体验使用预设回复，不会把文字发送到网络。';$('settings-dialog').close();};
+$('settings-dialog').addEventListener('close',()=>{settingsGeneration++;verification?.abort();$('api-key').value='';});
+window.addEventListener('pagehide',()=>{connection=null;cancel();verification?.abort();$('api-key').value='';});
+window.addEventListener('pageshow',e=>{if(e.persisted){connection=null;resetChat();$('mode-badge').textContent='本地体验';$('consent').checked=false;$('status').textContent='返回页面后已断开连接，请重新输入 API Key。';}});
 // No chat-reading or chat-sending agent tool is exposed; only the visible grounding flow.
 if (document.modelContext?.registerTool) {
   const lifecycle=new AbortController();

@@ -5,5 +5,5 @@
   "type": "module",
   "description": "A personal, privacy-conscious Chinese AI support space with a bounded safety harness.",
   "engines": { "node": ">=22" },
-  "scripts": { "start": "node --env-file-if-exists=.env server.mjs", "test": "node --test", "check": "node --check server.mjs && node --check harness.mjs && node --check public/app.js" }
+  "scripts": { "start": "node --env-file-if-exists=.env server.mjs", "test": "node --test", "check": "node --check server.mjs && node --check harness.mjs && node --check public/harness.js && node --check public/app.js" }
 }
