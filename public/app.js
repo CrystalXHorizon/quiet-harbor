@@ -67,7 +67,8 @@ let vaultGeneration=0;
 function clearPasswords(){ $('vault-password').value=''; $('vault-confirm').value=''; }
 function vaultStatus(){try{$('vault-status').textContent=readSaved()?'此设备已有加密密钥，输入解锁密码即可恢复。':'此设备尚未保存密钥。';}catch{$('vault-status').textContent='无法读取本地存储；仍可使用临时连接。';}}
 vaultStatus();
-$('remember-key').onchange=()=>{$('vault-fields').hidden=!$('remember-key').checked;clearPasswords();};
+$('remember-key').onchange=()=>{vaultGeneration++;$('vault-fields').hidden=!$('remember-key').checked;clearPasswords();};
+try{if(readSaved()){$('remember-key').checked=true;$('vault-fields').hidden=false;}}catch{}
 $('save-key').onclick=async()=>{
   const id=++vaultGeneration,button=$('save-key');
   try{
