@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="留岸，一个可以慢慢说话的个人 AI 情绪支持空间。">
+  <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="light">
+  <title>留岸 · 慢慢说，我在听</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#message">跳到对话输入</a>
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="留岸首页"><img src="./favicon.svg" alt="" width="40" height="40"><span>留岸<small>QUIET HARBOR</small></span></a>
+    <p class="side-caption">给此刻的自己，一点空间。</p>
+    <nav aria-label="主要功能">
+      <button class="nav-item active" id="chat-nav"><span aria-hidden="true">◌</span> 与我聊聊 <span class="nav-tail">01</span></button>
+      <button class="nav-item" data-ground><span aria-hidden="true">◎</span> 回到当下 <span class="nav-tail">02</span></button>
+    </nav>
+    <div class="side-note"><span class="overline">A LITTLE REMINDER</span><p>不需要一次<br>把所有事情说清楚。</p><span>从你愿意说的那一句开始。</span></div>
+    <div class="side-bottom"><button class="plain" id="settings-open">⚙ &nbsp; 连接与隐私</button><button class="plain" id="about-open">了解这里的陪伴边界</button><p>此刻，按自己的节奏就好。</p></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>我的陪伴空间 <span class="subtle">/ 与我聊聊</span></span><button class="help-button" data-help>需要现实中的支持</button></header>
+    <div class="workspace">
+      <section class="chat-space" aria-label="陪伴对话">
+        <div class="chat-heading"><div><span class="overline">A MOMENT FOR YOU</span><h1>慢慢说，我在听。</h1><p>今天的你，感觉怎么样？</p></div><span class="mode-badge" id="mode-badge">本地体验</span></div>
+        <div class="conversation" id="conversation" role="log" aria-label="聊天记录" aria-live="polite" aria-relevant="additions"></div>
+        <div class="suggestions" id="suggestions"><button data-prompt="今天有点难熬，我想找个地方说说。">今天有点难熬</button><button data-prompt="我感觉有些不真实，想先让自己稳定一点。">感觉有些不真实</button><button data-prompt="我暂时不想解释，只想安静待一会儿。">想安静待一会儿</button></div>
+        <p class="status" id="status" role="status">本地体验使用预设回复，不会把文字发送到网络。</p>
+        <form class="composer" id="chat-form"><label class="sr-only" for="message">你想说的话</label><textarea id="message" rows="2" maxlength="4000" placeholder="写下此刻的感受，不用整理得很好……"></textarea><div class="composer-bottom"><span>Enter 发送 · Shift + Enter 换行</span><button class="send" id="send" type="submit">发送 <span aria-hidden="true">↗</span></button><button class="send" id="stop" type="button" hidden>停止</button></div></form>
+        <div class="under-composer"><span>聊天仅留在当前页面 · 刷新即清空</span><button id="clear" class="plain">清空对话</button></div>
+        <p class="disclaimer">AI 陪伴不能替代专业评估或治疗，也无法提供紧急救援。</p>
+      </section>
+      <aside class="right-panel" aria-label="当下支持">
+        <section class="ground-card"><span class="overline">RIGHT HERE, RIGHT NOW</span><div class="anchor-symbol" aria-hidden="true">◎</div><h2>先回到这一刻</h2><p>如果思绪很远，可以试着留意身边一件看得见的东西。</p><button data-ground>陪我停一会儿 <span aria-hidden="true">↗</span></button><small>随时可以停下，无需闭眼。</small></section>
+        <section class="checkin"><span class="overline">一个小小的确认</span><h2>现在的感受更接近？</h2><div class="moods" aria-label="选择此刻感受"><button data-mood="平稳" aria-pressed="false">平稳</button><button data-mood="低落" aria-pressed="false">低落</button><button data-mood="紧绷" aria-pressed="false">紧绷</button><button data-mood="有些游离" aria-pressed="false">有些游离</button></div><p id="mood-note">没有标准答案，也可以不选。</p></section>
+        <section class="boundary"><div class="boundary-title"><span aria-hidden="true">◇</span><h2>温柔，也有边界</h2></div><p>不下诊断，不追问创伤细节。<br>你决定说什么，以及何时停下。</p><button class="plain" id="harness-open">查看陪伴保护机制 ↗</button></section>
+      </aside>
+    </div>
+  </main>
+  <dialog id="ground-dialog" aria-labelledby="ground-title"><button class="close" data-close aria-label="关闭">×</button><span class="overline">回到当下</span><h2 id="ground-title">按你的节奏，一小步就好。</h2><p>这些是可选的感官提示。如果不舒服，随时结束，保持自然呼吸。</p><div class="step-card"><span id="step-number">01 / 03</span><h3 id="step-title"></h3><p id="step-text"></p></div><div class="dialog-actions"><button class="secondary" data-close>现在就停下</button><button class="primary" id="next-step">下一步</button></div></dialog>
+  <dialog id="help-dialog" aria-labelledby="help-title"><button class="close" data-close aria-label="关闭">×</button><span class="overline">现实中的支持</span><h2 id="help-title">此刻，不必一个人承担。</h2><p>如果你可能马上伤害自己或他人，或已经受伤、服药过量，请立即联系当地急救服务或前往急诊，并请身边可信任的人陪着你。</p><p>在能安全做到的情况下，先远离可能伤害自己的物品。这里不会自动报警，也没有真人实时查看聊天。</p><div class="support-text">可以向信任的人这样开口：<br>“我现在状态不太好，希望你能陪我一会儿，帮我一起联系支持。”</div><p>持续的游离感、记忆困扰或身份相关体验，适合与有相关经验的精神科医生或心理治疗师讨论。</p><button class="primary" data-close>我知道了</button></dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><button class="close" data-close aria-label="关闭">×</button><span class="overline">由你掌握</span><h2 id="settings-title">连接与隐私</h2><p>未连接时使用本地预设回复。连接后，你发送的文字及最近部分对话会经个人服务端发送给所配置的 AI 服务商；其保留政策由服务商决定。</p><form id="settings-form"><label for="backend">个人服务端地址</label><input id="backend" type="url" placeholder="https://your-backend.example" autocomplete="off"><small>填写本项目服务端的地址，不是模型 API 地址。</small><label for="access-token">个人访问口令</label><input id="access-token" type="password" autocomplete="off" placeholder="服务端设置的 APP_ACCESS_TOKEN"><small>不是模型 API 密钥；这里只在页面内存中保留口令。</small><label class="consent"><input id="consent" type="checkbox">我同意将对话发送给此服务端及其 AI 服务商。</label><p id="settings-status" role="status"></p><div class="dialog-actions"><button type="button" class="secondary" id="disconnect">使用本地体验</button><button type="submit" class="primary">验证并连接</button></div></form></dialog>
+  <dialog id="about-dialog" aria-labelledby="about-title"><button class="close" data-close aria-label="关闭">×</button><span class="overline">陪伴保护机制 · HARNESS</span><h2 id="about-title">支持你的感受，尊重你的选择。</h2><p>留岸是情绪支持工具，不是治疗师，不诊断解离性身份障碍，不承诺治愈。</p><ol class="protection-list"><li><strong>先确认边界</strong><span>输入检查与 AI 风险判断，优先回应当下安全。</span></li><li><strong>让对话保持稳妥</strong><span>固定陪伴规则、有限上下文；不催眠、不恢复记忆、不诱导身份切换。</span></li><li><strong>回答前再检查</strong><span>回答通过规则与独立检查后才显示。检查失败会暂停 AI 回复。</span></li><li><strong>隐私留有选择</strong><span>应用不把聊天写入数据库、浏览器存储或日志。AI 服务商可能按其政策保留请求。</span></li></ol><p>这些保护可能误判或漏判，尚未经临床验证。体验模式只有本地规则与预设文字。你可以随时寻求现实中的支持。</p><a href="https://www.nhs.uk/mental-health/conditions/dissociative-disorders/" target="_blank" rel="noreferrer">了解解离相关困扰与专业支持（NHS，英文）↗</a></dialog>
+</body>
+</html>
