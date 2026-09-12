@@ -1,5 +1,6 @@
 import { quickRoute, demoReply, CRISIS_TEXT } from './safety.js';
 import { runHarness, validateMessages, verifyKey } from './harness.js';
+import {encryptKey,decryptKey,readSaved,writeSaved,forgetSaved} from './vault.js';
 const $ = id => document.getElementById(id);
 let history = [], connection = null, pending = null, generation = 0, step = 0, started = Date.now();
 const steps = [
@@ -62,6 +63,39 @@ $('mode-badge').outerHTML = '<button class="mode-badge" id="mode-badge" aria-lab
 $('mode-badge').onclick = () => openDialog('settings-dialog');
 let settingsGeneration=0;
 let verification=null;
+let vaultGeneration=0;
+function clearPasswords(){ $('vault-password').value=''; $('vault-confirm').value=''; }
+function vaultStatus(){try{$('vault-status').textContent=readSaved()?'此设备已有加密密钥，输入解锁密码即可恢复。':'此设备尚未保存密钥。';}catch{$('vault-status').textContent='无法读取本地存储；仍可使用临时连接。';}}
+vaultStatus();
+$('remember-key').onchange=()=>{$('vault-fields').hidden=!$('remember-key').checked;clearPasswords();};
+$('save-key').onclick=async()=>{
+  const id=++vaultGeneration,button=$('save-key');
+  try{
+    const key=$('api-key').value.trim() || connection?.key;
+    const password=$('vault-password').value;
+    if(password!==$('vault-confirm').value)throw new Error('两次密码不一致。');
+    button.disabled=true;
+    const record=await encryptKey(key,password);
+    if(id!==vaultGeneration)return;
+    try{writeSaved(record);}catch{throw new Error('浏览器不允许保存，密钥未写入。你仍可临时连接。');}
+    clearPasswords();vaultStatus();$('vault-status').textContent='已用 AES-256-GCM 加密保存。可继续验证连接；下次输入密码解锁。忘记密码只能重新输入 API Key。';
+  }catch(error){if(id===vaultGeneration)$('vault-status').textContent=error.message;}
+  finally{button.disabled=false;}
+};
+$('unlock-key').onclick=async()=>{
+  const id=++vaultGeneration,button=$('unlock-key');
+  try{
+    const record=readSaved();if(!record)throw new Error('还没有保存过密钥。');
+    button.disabled=true;const key=await decryptKey(record,$('vault-password').value);
+    if(id!==vaultGeneration)return;
+    $('api-key').value=key;clearPasswords();$('vault-status').textContent='已解锁到当前页面。勾选发送同意后，点击“验证并连接”。';
+  }catch(error){if(id===vaultGeneration){clearPasswords();$('vault-status').textContent=error.message;}}
+  finally{button.disabled=false;}
+};
+$('forget-key').onclick=()=>{
+  vaultGeneration++;settingsGeneration++;verification?.abort();
+  try{forgetSaved();connection=null;cancel();$('api-key').value='';clearPasswords();$('mode-badge').textContent='本地体验';$('status').textContent='已断开连接并清除已保存的密钥。';vaultStatus();}catch{$('vault-status').textContent='无法删除本地存储，请在浏览器设置中清除此网站数据。';}
+};
 $('settings-form').onsubmit = async e => {
   e.preventDefault(); const id=++settingsGeneration; const button = e.submitter;
   try {
@@ -76,7 +110,8 @@ $('settings-form').onsubmit = async e => {
   finally {button.disabled=false;}
 };
 $('disconnect').onclick = () => {settingsGeneration++;verification?.abort();connection=null;resetChat();$('api-key').value='';$('consent').checked=false;$('mode-badge').textContent='本地体验';$('status').textContent='本地体验使用预设回复，不会把文字发送到网络。';$('settings-dialog').close();};
-$('settings-dialog').addEventListener('close',()=>{settingsGeneration++;verification?.abort();$('api-key').value='';});
+$('settings-dialog').addEventListener('close',()=>{vaultGeneration++;clearPasswords();settingsGeneration++;verification?.abort();$('api-key').value='';});
+window.addEventListener('pagehide',()=>{vaultGeneration++;clearPasswords();});
 window.addEventListener('pagehide',()=>{connection=null;cancel();verification?.abort();$('api-key').value='';});
 window.addEventListener('pageshow',e=>{if(e.persisted){connection=null;resetChat();$('mode-badge').textContent='本地体验';$('consent').checked=false;$('status').textContent='返回页面后已断开连接，请重新输入 API Key。';}});
 // No chat-reading or chat-sending agent tool is exposed; only the visible grounding flow.
