@@ -46,3 +46,5 @@ WebMCP 仅提供 `start_grounding({})` 打开感官提示，不提供读取或�
 - [DeepSeek 官方 API 文档](https://api-docs.deepseek.com/zh-cn/)
 - [NHS：解离相关困扰与专业支持](https://www.nhs.uk/mental-health/conditions/dissociative-disorders/)
 - [OWASP：提示注入防范](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
+
+自然倾听规则包含倾诉、实际帮助、纠正误解、暂停和减少提问五种本轮提示；只接受枚举值，不能改变安全边界。正常对话仍为三次 API 请求。真实语言质量的验收案例见 [evals/conversation.md](evals/conversation.md)，自动化测试不代表真实模型语言质量或治疗效果。

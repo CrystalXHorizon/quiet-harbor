@@ -17,7 +17,7 @@ function addMessage(role, text, label) {
   while ($('conversation').children.length > 60) $('conversation').firstElementChild.remove();
   row.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 }
-function welcome() { addMessage('assistant', '欢迎来到留岸。\n\n这里不用表现得很好，也不必急着找到答案。你可以说说今天发生的事，或者只告诉我，现在是什么感觉。', '留岸 · 欢迎语'); }
+function welcome() { addMessage('assistant', '今天想聊点什么？不想从头解释也没关系，从你想说的地方开始。', '留岸 · 欢迎语'); }
 function setBusy(value) { $('send').hidden = value; $('stop').hidden = !value; $('message').readOnly = value; $('conversation').setAttribute('aria-busy', String(value)); }
 function cancel() { generation++; pending?.abort(); pending = null; setBusy(false); }
 function trimHistory() { history = history.slice(-12); while (history.reduce((n,m) => n+m.content.length,0) > 16000) history.shift(); }

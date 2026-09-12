@@ -12,8 +12,10 @@ export function demoReply(text, turn = 0) {
   const route = quickRoute(text);
   if (route === 'crisis') return { text: CRISIS_TEXT, route };
   if (route === 'boundary') return { text: BOUNDARY_TEXT, route };
+  if (/别.*问|不要.*问|不想.*被问/.test(text)) return {route:'support',text:'好，我不追着问了。'};
+  if (/别.*建议|不要.*建议|不想.*建议/.test(text)) return {route:'support',text:'好，先不想办法，你接着说。'};
   if (/不真实|不真實|游离|遊離|飘|麻木|解离|解離/.test(text)) return { route: 'grounding', text: '这种感觉可能让人不安。暂时不用急着解释它。\n\n如果你愿意，可以看一看周围，找一件颜色清楚的物品，轻轻说出它的颜色。觉得不舒服就停下。你也可以点「回到当下」，按自己的节奏试试。' };
-  if (/安静|安靜|不想说|不想說/.test(text)) return { route: 'support', text: '好，可以先不解释。你不需要现在就回复。\n\n让自己保持一个舒服的位置，看看身边的环境；也可以关掉页面休息一会儿。' };
-  const replies = ['我们可以从很小的一件事开始。\n\n你现在更希望有人听你说，还是一起想一个能让接下来几分钟好过一点的小办法？', '不用把感受整理得很清楚。你可以只说最想被听见的那一部分，也可以暂时不说。\n\n此刻有什么能让你稍微舒服一点点？'];
+  if (/安静|安靜|不想说|不想說/.test(text)) return { route: 'support', text: '好，先不说也行，不用急着回复。' };
+  const replies = ['你可以从最想说的那件事开始，不用从头讲。', '可以接着说，不用急着找一个答案。'];
   return { route: 'support', text: replies[turn % replies.length] };
 }
