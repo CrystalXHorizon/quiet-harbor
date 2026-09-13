@@ -1,0 +1,31 @@
+Quiet Harbor / 留岸
+Copyright (c) 2026 CrystalXHorizon
+
+This project uses different licenses for different materials:
+
+1. Software code, configuration, tests, and operational AI prompts are
+   licensed under the MIT License. See LICENSE-MIT.
+   This includes JavaScript, HTML structure, CSS implementation, server
+   code, workflows, and code examples in documentation.
+
+2. Original documentation prose, user-facing editorial/support text,
+   and original visual artwork (including public/favicon.svg) are
+   licensed under Creative Commons Attribution-ShareAlike 4.0
+   International. See LICENSE-CC-BY-SA-4.0.
+   This applies to the text/artwork even when embedded in source files;
+   the surrounding software implementation remains MIT-licensed.
+
+These licenses apply to their respective materials, not as alternative
+licenses from which a recipient may choose for the entire project.
+
+Attribution: CrystalXHorizon, Quiet Harbor / 留岸
+Source: https://github.com/CrystalXHorizon/quiet-harbor
+
+Third-party materials retain their original licenses and attribution.
+References to WHO, NHS, and AI providers do not relicense their source
+publications, models, services, or trademarks. Any original adaptations
+are licensed only to the extent of rights held by the project author.
+Private user conversations, credentials, and runtime model outputs are
+not included in this repository's licensing grant.
+
+The full license texts govern; this notice defines their scope.

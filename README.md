@@ -1,5 +1,16 @@
 # 留岸 · Quiet Harbor
 
+## 许可协议
+
+Copyright © 2026 [CrystalXHorizon](https://github.com/CrystalXHorizon)。本项目按内容类型分别授权：
+
+- **代码采用 [MIT](LICENSE-MIT)**：包括程序、HTML 结构、CSS 实现、配置、测试、运行时 AI 提示词及文档中的代码示例。
+- **原创内容采用 [CC BY-SA 4.0](LICENSE-CC-BY-SA-4.0)**：包括说明文档正文、面向用户的文案与支持建议、原创视觉素材（含图标）。嵌入代码的文案仍按此协议授权，周围的程序实现采用 MIT。
+
+这不是对整个项目任选 MIT 或 CC BY-SA 的双重授权。使用代码须保留 MIT 版权及许可声明；分享原创内容须署名、注明修改并按 CC BY-SA 条款共享改编内容。建议署名：`留岸 / Quiet Harbor — CrystalXHorizon`，附[项目来源](https://github.com/CrystalXHorizon/quiet-harbor)和许可链接。
+
+第三方资料保持原许可；WHO、NHS 等参考出版物及各供应商服务不因本项目而重新授权。私人聊天、密钥及运行时模型输出不在此授权范围内。完整范围见 [LICENSE](LICENSE)，具体条件以两份协议正文为准。
+
 中文个人 AI 情绪支持网页，浏览器直接连接所选 AI 服务的 API，无需部署服务端。
 
 ## 使用

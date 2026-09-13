@@ -2,6 +2,7 @@
   "name": "quiet-harbor",
   "version": "1.0.0",
   "private": true,
+  "license": "(MIT AND CC-BY-SA-4.0)",
   "type": "module",
   "description": "A personal, privacy-conscious Chinese AI support space with a bounded safety harness.",
   "engines": { "node": ">=22" },
