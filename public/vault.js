@@ -10,14 +10,14 @@ async function derive(password,salt) {
 }
 export async function encryptKey(key,password) {
   if(typeof password!=='string' || password.length<12)throw new Error('解锁密码至少需要 12 个字符。');
-  if(typeof key!=='string' || !key.trim() || key.length>1024)throw new Error('请输入有效的 API Key。');
+  if(typeof key!=='string' || !key.trim() || key.length>4096)throw new Error('请输入有效的 API Key。');
   const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
   const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:aad},await derive(password,salt),encoder.encode(key));
   return {version:1,iterations,salt:encode(salt),iv:encode(iv),ciphertext:encode(ciphertext)};
 }
 export async function decryptKey(record,password) {
   try {
-    if(record?.version!==1 || record.iterations!==iterations || typeof record.ciphertext!=='string' || record.ciphertext.length>6000)throw Error();
+    if(record?.version!==1 || record.iterations!==iterations || typeof record.ciphertext!=='string' || record.ciphertext.length>24000)throw Error();
     const salt=decode(record.salt),iv=decode(record.iv);
     if(salt.length!==16 || iv.length!==12)throw Error();
     const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:aad},await derive(password,salt),decode(record.ciphertext));
@@ -26,7 +26,7 @@ export async function decryptKey(record,password) {
 }
 export function readSaved(storage=localStorage) {
   const raw=storage.getItem(SLOT);if(raw===null)return null;
-  if(raw.length>8000)throw new Error('保存的数据损坏，请忘记后重新保存。');
+  if(raw.length>26000)throw new Error('保存的数据损坏，请忘记后重新保存。');
   try{return JSON.parse(raw);}catch{throw new Error('保存的数据损坏，请忘记后重新保存。');}
 }
 export function writeSaved(record,storage=localStorage) {storage.setItem(SLOT,JSON.stringify(record));}

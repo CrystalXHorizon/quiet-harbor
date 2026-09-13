@@ -1,5 +1,6 @@
+import {PROVIDERS,normalizeConfig,providerEnv,packConnection,unpackConnection} from './providers.js';
 import { quickRoute, demoReply, CRISIS_TEXT } from './safety.js';
-import { runHarness, validateMessages, verifyKey } from './harness.js';
+import { runHarness, validateMessages, verifyKey, listModels } from './harness.js';
 import {encryptKey,decryptKey,readSaved,writeSaved,forgetSaved} from './vault.js';
 import {strategies,strategyMessages} from './strategies.js';
 const $ = id => document.getElementById(id);
@@ -25,15 +26,15 @@ async function sendMessage() {
   const text = $('message').value.trim(); if (!text || pending) return;
   $('message').value = ''; addMessage('user', text); history.push({ role:'user', content:text }); trimHistory();
   if (quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); return; }
-  if (!connection) { const reply = demoReply(text, history.filter(m => m.role === 'user').length - 1); addMessage('assistant', reply.text, '留岸 · 本地预设回复'); history.push({ role:'assistant', content:reply.text }); trimHistory(); $('status').textContent = '这是本地预设回复。要与 DeepSeek 对话，请打开「连接与隐私」。'; return; }
+  if (!connection) { const reply = demoReply(text, history.filter(m => m.role === 'user').length - 1); addMessage('assistant', reply.text, '留岸 · 本地预设回复'); history.push({ role:'assistant', content:reply.text }); trimHistory(); $('status').textContent = '这是本地预设回复。要与 AI 对话，请打开「连接与隐私」。'; return; }
   const requestId = ++generation; const controller = new AbortController(); pending = controller; setBusy(true);
   $('status').textContent = '正在倾听，并检查回答是否合适……';
   const timeout = setTimeout(() => controller.abort(), 95000);
   try {
-    const data = await runHarness(validateMessages(history), { AI_API_KEY: connection.key }, {signal:controller.signal, reportErrors:true});
+    const data = await runHarness(validateMessages(history), providerEnv(connection.config,connection.key), {signal:controller.signal, reportErrors:true});
     if (typeof data.text !== 'string' || data.text.length > 8000) throw new Error('收到了无法显示的回答，请重试。');
     if (generation !== requestId) return;
-    addMessage(data.route === 'crisis' ? 'notice' : 'assistant', data.text, data.mode === 'ai' ? '留岸 · DeepSeek' : '留岸 · 保护提示');
+    addMessage(data.route === 'crisis' ? 'notice' : 'assistant', data.text, data.mode === 'ai' ? '留岸 · '+connection.config.model : '留岸 · 保护提示');
     history.push({role:'assistant',content:data.text}); trimHistory();
     $('status').textContent = data.mode === 'ai' ? '回复已完成检查。检查仍可能遗漏问题，请以专业支持为准。' : '已切换为预设支持提示。';
     if (data.route === 'crisis') openDialog('help-dialog');
@@ -87,12 +88,12 @@ document.querySelectorAll('[data-practice-feedback]').forEach(b=>b.onclick=()=>{
 $('strategy-stop').onclick=()=>{cancelStrategy();$('strategy-result').textContent='已停止。你可以继续查看通用方法。';};
 $('strategy-generate').onclick=async()=>{
  if(strategyPending)return;
- if(!connection){$('strategy-result').textContent='需要先在“连接与隐私”连接 DeepSeek。未连接时，上方方法仍可直接查看，不会发送聊天。';return;}
+ if(!connection){$('strategy-result').textContent='需要先在“连接与隐私”连接 AI 服务。未连接时，上方方法仍可直接查看，不会发送聊天。';return;}
  if(pending){$('strategy-result').textContent='请等这条聊天回复结束，或先停止回复。';return;}
  let messages;try{messages=validateMessages(strategyMessages(history));}catch(error){$('strategy-result').textContent=error.message;return;}
  const controller=new AbortController();strategyPending=controller;$('strategy-generate').disabled=true;$('strategy-stop').hidden=false;$('strategy-result').textContent='正在结合最近的聊天选择方法，并检查建议……';
  const timeout=setTimeout(()=>controller.abort(),95000);
- try{const result=await runHarness(messages,{AI_API_KEY:connection.key},{signal:controller.signal,reportErrors:true});if(strategyPending!==controller)return;$('strategy-result').textContent=(result.mode==='ai'?'根据当前聊天的建议\n\n':'支持提示\n\n')+result.text;if(result.route==='crisis'){$('ground-dialog').close();openDialog('help-dialog');}}
+ try{const result=await runHarness(messages,providerEnv(connection.config,connection.key),{signal:controller.signal,reportErrors:true});if(strategyPending!==controller)return;$('strategy-result').textContent=(result.mode==='ai'?'根据当前聊天的建议\n\n':'支持提示\n\n')+result.text;if(result.route==='crisis'){$('ground-dialog').close();openDialog('help-dialog');}}
  catch(error){if(strategyPending===controller)$('strategy-result').textContent=controller.signal.aborted?'请求已超时。可以先选一种通用方法，稍后再试。':error.message;}
  finally{clearTimeout(timeout);if(strategyPending===controller)cancelStrategy();}
 };
@@ -106,6 +107,27 @@ $('mode-badge').onclick = () => openDialog('settings-dialog');
 let settingsGeneration=0;
 let verification=null;
 let vaultGeneration=0;
+function formConfig(requireModel=true){return normalizeConfig({provider:$('provider').value,base:$('api-base').value,protocol:$('api-protocol').value,model:$('api-model').value||(!requireModel?'model-list':''),tokenField:$('token-field').value,jsonMode:$('json-mode').checked});}
+function destination(){try{$('connection-destination').textContent='请求发送到：'+providerEnv(formConfig(false),'').AI_ENDPOINT;}catch{$('connection-destination').textContent='请先填写有效的 HTTPS API 地址。';}}
+function invalidateSettings(clearKey=false){settingsGeneration++;vaultGeneration++;verification?.abort();$('consent').checked=false;if(clearKey){$('model-options').replaceChildren();$('api-key').value='';}$('settings-status').textContent='设置已改变，请重新确认发送目标。当前聊天连接需验证成功后才会切换。';destination();}
+function paintProvider(config){
+ const p=PROVIDERS.find(p=>p.id===(config?.provider||$('provider').value));
+ $('provider').value=p.id;$('api-base').value=config?.base??p.base;$('api-protocol').value=config?.protocol??p.protocol;$('api-model').value=config?.model??p.model;$('token-field').value=config?.tokenField??p.tokenField;$('json-mode').checked=config?.jsonMode??p.id==='deepseek';
+ $('provider-docs').hidden=!p.docs;$('provider-docs').href=p.docs||'#';
+ $('provider-note').textContent=p.id==='custom'?'自定义接口会接收你的密钥和对话，请核对接收方。仅支持下方两种协议。':p.id==='qwen'?'预设为北京兼容地址。不同地区的密钥和地址须匹配，也可填写业务空间专属地址。':'预设使用官方 API 地址。需要 API 平台的密钥，聊天应用订阅不等于 API 额度。';destination();
+}
+PROVIDERS.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;$('provider').append(o);});paintProvider();
+$('provider').onchange=()=>{invalidateSettings(true);paintProvider();};
+$('api-base').oninput=()=>invalidateSettings(true);
+for(const id of ['api-protocol','api-model','token-field','json-mode'])$(id).addEventListener('input',()=>invalidateSettings(false));
+$('consent').addEventListener('change',()=>{if(!$('consent').checked){settingsGeneration++;verification?.abort();}});
+$('api-key').addEventListener('input',()=>{settingsGeneration++;vaultGeneration++;verification?.abort();});
+$('load-models').onclick=async()=>{
+ const id=++settingsGeneration,b=$('load-models');verification?.abort();verification=new AbortController();
+ try{if(!$('consent').checked)throw new Error('请先确认请求发送目标并勾选同意。');const key=$('api-key').value.trim();if(!key)throw new Error('请先填写 API Key。');const env=providerEnv(formConfig(false),key);b.disabled=true;$('settings-status').textContent='正在读取模型列表……';const models=await listModels(env,{signal:verification.signal});if(id!==settingsGeneration)return;$('model-options').replaceChildren();models.forEach(model=>{const o=document.createElement('option');o.value=model;$('model-options').append(o);});$('settings-status').textContent=models.length?'已读取 '+models.length+' 个模型，点击模型输入框选择，或手动填写。':'没有可列出的模型，请手动填写。';}
+ catch(error){if(id===settingsGeneration)$('settings-status').textContent=error.message;}finally{b.disabled=false;}
+};
+
 function clearPasswords(){ $('vault-password').value=''; $('vault-confirm').value=''; }
 function vaultStatus(){try{$('vault-status').textContent=readSaved()?'此设备已有加密密钥，输入解锁密码即可恢复。':'此设备尚未保存密钥。';}catch{$('vault-status').textContent='无法读取本地存储；仍可使用临时连接。';}}
 vaultStatus();
@@ -114,11 +136,11 @@ try{if(readSaved()){$('remember-key').checked=true;$('vault-fields').hidden=fals
 $('save-key').onclick=async()=>{
   const id=++vaultGeneration,button=$('save-key');
   try{
-    const key=$('api-key').value.trim() || connection?.key;
+    const config=formConfig();const key=$('api-key').value.trim() || (JSON.stringify(config)===JSON.stringify(connection?.config)?connection?.key:null);
     const password=$('vault-password').value;
     if(password!==$('vault-confirm').value)throw new Error('两次密码不一致。');
     button.disabled=true;
-    const record=await encryptKey(key,password);
+    const record=await encryptKey(packConnection(config,key),password);
     if(id!==vaultGeneration)return;
     try{writeSaved(record);}catch{throw new Error('浏览器不允许保存，密钥未写入。你仍可临时连接。');}
     clearPasswords();vaultStatus();$('vault-status').textContent='已用 AES-256-GCM 加密保存。可继续验证连接；下次输入密码解锁。忘记密码只能重新输入 API Key。';
@@ -131,7 +153,7 @@ $('unlock-key').onclick=async()=>{
     const record=readSaved();if(!record)throw new Error('还没有保存过密钥。');
     button.disabled=true;const key=await decryptKey(record,$('vault-password').value);
     if(id!==vaultGeneration)return;
-    $('api-key').value=key;clearPasswords();$('vault-status').textContent='已解锁到当前页面。勾选发送同意后，点击“验证并连接”。';
+    const saved=unpackConnection(key);paintProvider(saved.config);$('consent').checked=false;$('api-key').value=saved.key;clearPasswords();$('vault-status').textContent='已解锁到当前页面。勾选发送同意后，点击“验证并连接”。';
   }catch(error){if(id===vaultGeneration){clearPasswords();$('vault-status').textContent=error.message;}}
   finally{button.disabled=false;}
 };
@@ -143,12 +165,13 @@ $('settings-form').onsubmit = async e => {
   e.preventDefault(); const id=++settingsGeneration; const button = e.submitter;
   try {
     if (!$('consent').checked) throw new Error('连接前，请确认你同意发送对话。');
-    const key=$('api-key').value.trim(); if (!key || /\s/.test(key)) throw new Error('请输入有效的 DeepSeek API Key，不要包含空格。');
-    button.disabled=true; $('settings-status').textContent='正在连接 DeepSeek 官方 API……';
+    const key=$('api-key').value.trim(); if (!key || /\s/.test(key) || key.length>1024) throw new Error('请输入有效的 API Key，不要包含空格。');
+    const config=formConfig();
+    button.disabled=true; $('settings-status').textContent='正在测试所选模型（不发送聊天内容）……';
     verification?.abort(); verification=new AbortController();
-    await verifyKey(key,{signal:verification.signal});
+    await verifyKey(key,{signal:verification.signal,env:providerEnv(config,key)});
     if (id!==settingsGeneration) return;
-    connection={key}; resetChat(); $('mode-badge').textContent='DeepSeek 已连接'; $('status').textContent='已直连 DeepSeek。密钥只在当前页面保留，刷新即清除。'; $('settings-status').textContent='连接成功。'; $('api-key').value=''; $('settings-dialog').close();
+    connection={key,config}; resetChat(); $('mode-badge').textContent=config.model+' · 已连接'; $('status').textContent='已连接 '+new URL(config.base).hostname+' / '+config.model+'。当前解锁密钥在刷新后清除。'; $('settings-status').textContent='连接成功。'; $('api-key').value=''; $('settings-dialog').close();
   } catch(error) {if(id===settingsGeneration) $('settings-status').textContent=error.name==='TimeoutError' ? '连接超时，请稍后再试。' : error.message;}
   finally {button.disabled=false;}
 };

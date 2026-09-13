@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { configured, validateMessages, runHarness } from './harness.mjs';
-const assets=new Map([['/',['index.html','text/html; charset=utf-8']],['/index.html',['index.html','text/html; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/harness.js',['harness.js','text/javascript; charset=utf-8']],['/vault.js',['vault.js','text/javascript; charset=utf-8']],['/safety.js',['safety.js','text/javascript; charset=utf-8']],['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const assets=new Map([['/providers.js',['providers.js','text/javascript; charset=utf-8']],['/strategies.js',['strategies.js','text/javascript; charset=utf-8']],['/',['index.html','text/html; charset=utf-8']],['/index.html',['index.html','text/html; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/harness.js',['harness.js','text/javascript; charset=utf-8']],['/vault.js',['vault.js','text/javascript; charset=utf-8']],['/safety.js',['safety.js','text/javascript; charset=utf-8']],['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 export function createApp(env=process.env, options={}) {
   const origins=new Set((env.ALLOWED_ORIGINS || 'http://127.0.0.1:4173,http://localhost:4173').split(',').map(x=>x.trim()).filter(Boolean));
   let times=[],active=0,day='',dailyCount=0;
