@@ -1,13 +1,18 @@
 import {runHarness,validateMessages,verifyKey} from './harness.js';
 import {providerEnv} from './providers.js';
+import {resolveSupabaseKeys} from './supabase-keys.js';
 import {ApiError,errorResponse,rpcError,allowedOrigins,safeProviderConfig,validateKey,encryptKey,decryptKey,readJson,verifiedAal2,validateAction} from './security.js';
 
 export function createApiHandler({env,fetchImpl=fetch}) {
  const origins=allowedOrigins(env.ALLOWED_ORIGINS);
+ const {publishableKey,secretKey}=resolveSupabaseKeys(env);
  async function internalFetch(path,body,token) {
   const service=token===undefined;
-  const headers={apikey:service?env.SUPABASE_SERVICE_ROLE_KEY:env.SUPABASE_ANON_KEY,Authorization:`Bearer ${service?env.SUPABASE_SERVICE_ROLE_KEY:token}`,'Content-Type':'application/json'};
+  const key=service?secretKey:publishableKey;
+  const headers={apikey:key,'Content-Type':'application/json'};
   if(!env.SUPABASE_URL||!headers.apikey)throw new ApiError('not_configured',503);
+  // Opaque secret keys authenticate through apikey; only JWTs use Bearer.
+  if(!service||!key.startsWith('sb_secret_'))headers.Authorization=`Bearer ${service?key:token}`;
   let response;try{response=await fetchImpl(env.SUPABASE_URL.replace(/\/$/,'')+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new ApiError('internal',503);}
   let data;try{data=await response.json();}catch{throw new ApiError('internal',503);}
   if(!response.ok){if(!service)throw new ApiError('unauthorized',401);throw rpcError(data);}

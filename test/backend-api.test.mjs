@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createApiHandler} from '../supabase/functions/_shared/api.js';
+import {resolveSupabaseKeys} from '../supabase/functions/_shared/supabase-keys.js';
 import {safeProviderConfig,encryptKey,decryptKey,validateAction,allowedOrigins} from '../supabase/functions/_shared/security.js';
 
 const userId='22222222-2222-4222-8222-222222222222';
@@ -13,6 +14,53 @@ const user={id:userId,email_confirmed_at:'2026-10-01T00:00:00Z'};
 const request=(body,aal='aal1',headers={})=>new Request('https://example.supabase.co/functions/v1/api',{method:'POST',headers:{origin,authorization:'Bearer '+token(aal),'content-type':'application/json',...headers},body:JSON.stringify(body)});
 const json=(value,status=200)=>Response.json(value,{status});
 function mockHandler(handle){const calls=[];return {calls,handler:createApiHandler({env,fetchImpl:async(url,options)=>{const c={url:String(url),...options};calls.push(c);if(c.url.endsWith('/auth/v1/user'))return json(user);return handle(c);}})};}
+
+test('Supabase default key dictionaries and legacy environments both validate users before service RPC',async()=>{
+ const modern={SUPABASE_PUBLISHABLE_KEYS:JSON.stringify({default:'sb_publishable_test'}),SUPABASE_SECRET_KEYS:JSON.stringify({default:'sb_secret_test'})};
+ const cases=[
+  {variables:env,publishable:'public-key',secret:'private-service'},
+  {variables:{...env,SUPABASE_ANON_KEY:undefined,SUPABASE_SERVICE_ROLE_KEY:undefined,...modern},publishable:'sb_publishable_test',secret:'sb_secret_test'},
+  {variables:{...env,...modern},publishable:'sb_publishable_test',secret:'sb_secret_test'},
+  {variables:{...env,SUPABASE_PUBLISHABLE_KEYS:modern.SUPABASE_PUBLISHABLE_KEYS},publishable:'sb_publishable_test',secret:'private-service'},
+  {variables:{...env,SUPABASE_SECRET_KEYS:modern.SUPABASE_SECRET_KEYS},publishable:'public-key',secret:'sb_secret_test'}
+ ];
+ for(const {variables,publishable,secret} of cases){
+  const calls=[];
+  const handler=createApiHandler({env:variables,fetchImpl:async(url,options)=>{
+   calls.push(String(url));
+   if(calls.length===1){
+    assert.equal(String(url),env.SUPABASE_URL+'/auth/v1/user');
+    assert.equal(options.headers.apikey,publishable);
+    assert.equal(options.headers.Authorization,'Bearer '+token());
+    return json(user);
+   }
+   assert.equal(String(url),env.SUPABASE_URL+'/rest/v1/rpc/qh_action');
+   assert.equal(options.headers.apikey,secret);
+   assert.equal(options.headers.Authorization,secret.startsWith('sb_secret_')?undefined:'Bearer '+secret);
+   assert.equal(JSON.parse(options.body).actor,userId);
+   return json({profile:{id:userId,role:'member'}});
+  }});
+  const response=await handler(request({action:'me'}));
+  assert.equal(response.status,200);assert.equal(calls.length,2);
+  assert.ok(!(await response.text()).includes(secret));
+ }
+});
+
+test('missing or malformed default key dictionaries fail closed or fall back to legacy keys',async()=>{
+ const invalid=[undefined,'','not-json','null','[]','{}','{"other":"sb_secret_other"}','{"default":null}','{"default":123}','{"default":""}','{"default":"sb_secret_"}','{"default":"sb_secret_has space"}','{"default":"sb_publishable_wrong_role"}'];
+ for(const raw of invalid){
+  const variables={...env,SUPABASE_PUBLISHABLE_KEYS:raw,SUPABASE_SECRET_KEYS:raw};
+  const resolved=resolveSupabaseKeys(variables);
+  assert.equal(resolved.secretKey,'private-service');
+  // Even a valid publishable dictionary can never be selected as the secret key.
+  assert.equal(resolved.publishableKey,raw==='{"default":"sb_publishable_wrong_role"}'?'sb_publishable_wrong_role':'public-key');
+  let calls=0;
+  const handler=createApiHandler({env:{...variables,SUPABASE_ANON_KEY:undefined,SUPABASE_SERVICE_ROLE_KEY:undefined},fetchImpl:async()=>{calls++;return json(user);}});
+  const response=await handler(request({action:'me'}));
+  assert.equal(response.status,503);assert.equal((await response.json()).code,'not_configured');
+  assert.equal(calls,raw==='{"default":"sb_publishable_wrong_role"}'?1:0);
+ }
+});
 
 test('API rejects foreign origin, missing auth and invalid method before touching any service',async()=>{
  const {handler,calls}=mockHandler(()=>{throw new Error('Unexpected');});

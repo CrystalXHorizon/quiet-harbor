@@ -4,6 +4,8 @@ import {createApiHandler} from '../_shared/api.js';
 // asymmetric signing keys. This handler verifies every bearer token with Auth.
 Deno.serve(createApiHandler({env:{
  SUPABASE_URL:Deno.env.get('SUPABASE_URL'),
+ SUPABASE_PUBLISHABLE_KEYS:Deno.env.get('SUPABASE_PUBLISHABLE_KEYS'),
+ SUPABASE_SECRET_KEYS:Deno.env.get('SUPABASE_SECRET_KEYS'),
  SUPABASE_ANON_KEY:Deno.env.get('SUPABASE_ANON_KEY'),
  SUPABASE_SERVICE_ROLE_KEY:Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
  ALLOWED_ORIGINS:Deno.env.get('ALLOWED_ORIGINS'),
