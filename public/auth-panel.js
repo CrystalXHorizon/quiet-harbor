@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createBackendClient, loadSiteConfig } from './backend-client.js';
+import { authNavigation, authLandingUrl } from './auth-navigation.js';
 
 const roleNames = { member: '普通成员', moderator: '社区管理员', owner: '站长' };
 function element(tag, text, className) {
@@ -19,7 +20,7 @@ function input(form, labelText, name, { type = 'text', autocomplete = 'off', val
   if (maxLength) node.maxLength = maxLength;
   form.append(label, node); return node;
 }
-function landingUrl() { const url = new URL('./', location.href); url.search = ''; url.hash = ''; return url.href; }
+function landingUrl(action) { return authLandingUrl(location.href, action); }
 function authError(error) {
   if (error?.isBackendError) return error.message;
   const messages = {
@@ -38,10 +39,11 @@ export async function initAuth({ onChange = () => {} } = {}) {
   const dialog = document.getElementById('auth-dialog');
   if (!dialog) throw new Error('缺少账户对话框。');
   let config = null, backend = null, mode = 'login', pending = false, viewId = 0, enrolled = null;
-  let startupError = '', recovery = false, factorId = null;
-  const callback = new URLSearchParams(location.hash.slice(1));
-  let invitation = callback.get('type') === 'invite';
-  const implicitCallback = callback.has('access_token') && ['invite', 'recovery', 'signup', 'magiclink'].includes(callback.get('type'));
+  const navigation = authNavigation(location.href);
+  let startupError = '', recovery = navigation.recovery, factorId = null;
+  if (navigation.reset) mode = 'reset';
+  let invitation = navigation.invitation;
+  const implicitCallback = navigation.implicit;
   let content, status;
   function open() { render(); if (!dialog.open) dialog.showModal(); }
   function message(text) { status.textContent = text; }
@@ -76,7 +78,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     const action = element('button', title, 'primary'); action.type = 'submit'; row.append(action); form.append(row);
     form.onsubmit = event => { event.preventDefault(); void handler(); };
   }
-  function switchMode(value) { if (pending) return; clearSensitive(); mode = value; render(); }
+  function switchMode(value) { if (pending) return; clearSensitive(); mode = value; if (value !== 'reset') { recovery = false; invitation = false; } render(); }
   function render() {
     viewId++;
     const close = button('×', () => dialog.close(), 'close'); close.setAttribute('aria-label', '关闭账户设置');
@@ -90,13 +92,17 @@ export async function initAuth({ onChange = () => {} } = {}) {
     }
     const session = backend.getSession();
     if (session?.mfaRequired) { title.textContent = '完成二次验证'; renderAccount(session); return; }
-    if (recovery && session?.user) { title.textContent = '设置新密码'; renderPassword(); return; }
+    if ((recovery || invitation) && session?.user) { title.textContent = '设置新密码'; renderPassword(); return; }
     if (session?.user) { renderAccount(session); return; }
+    if (mode === 'reset' || recovery || invitation) {
+      mode = 'reset'; title.textContent = '找回密码';
+      content.append(element('p', recovery || invitation ? '邮件链接未能建立有效登录，可能已经过期或使用过。请重新发送找回密码邮件。' : '填写你的登录邮箱，我们会发送设置新密码的链接。'));
+    }
     const tabs = element('div', undefined, 'auth-tabs support-actions');
     tabs.append(button('登录', () => switchMode('login'), mode === 'login' ? 'primary' : 'secondary'));
     if (!config.inviteOnly) tabs.append(button('注册', () => switchMode('signup'), mode === 'signup' ? 'primary' : 'secondary'));
     content.append(tabs);
-    if (config.inviteOnly) content.append(element('p', '目前仅向受邀用户开放。已有邀请的话，请先打开邀请邮件，再设置密码。'));
+    if (config.inviteOnly && mode !== 'reset') content.append(element('p', '目前仅向受邀用户开放。已有账号可以直接登录；忘记密码请点击下方找回。'));
     const form = element('form', undefined, 'auth-form');
     const email = input(form, '邮箱', 'email', { type: 'email', autocomplete: 'email', maxLength: 254 });
     let password, nickname;
@@ -109,7 +115,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
       const address = email.value.trim(), pass = password?.value || '', name = nickname?.value.trim();
       if (password) password.value = '';
       return run(async () => {
-        if (mode === 'reset') return backend.client.auth.resetPasswordForEmail(address, { redirectTo: landingUrl() });
+        if (mode === 'reset') return backend.client.auth.resetPasswordForEmail(address, { redirectTo: landingUrl('recovery') });
         if (mode === 'signup') return backend.client.auth.signUp({ email: address, password: pass, options: { emailRedirectTo: landingUrl(), data: { nickname: name } } });
         return backend.client.auth.signInWithPassword({ email: address, password: pass });
       }, async result => {
@@ -128,7 +134,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     submit(form, '保存密码', () => {
       if (password.value !== confirm.value) { message('两次密码不一致，请重新输入。'); return; }
       const pass = password.value; password.value = ''; confirm.value = '';
-      return run(() => backend.client.auth.updateUser({ password: pass }), async () => { recovery = false; invitation = false; await backend.refresh(); render(); message('密码已更新。'); });
+      return run(() => backend.client.auth.updateUser({ password: pass }), async () => { recovery = false; invitation = false; history.replaceState(null, '', landingUrl()); await backend.refresh(); render(); message('密码已更新。'); });
     });
     content.append(form);
   }
@@ -245,6 +251,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     await backend.refresh();
   } else { onChange(null); }
   render();
-  if (startupError && config) { if (implicitCallback || new URLSearchParams(location.search).has('code')) open(); message(startupError); }
+  if (navigation.open) open();
+  if ((startupError || navigation.callbackError) && config) { open(); message(startupError || '邮件链接已失效，请重新发送找回密码邮件，并打开最新的一封。'); }
   return controller;
 }

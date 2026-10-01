@@ -28,7 +28,7 @@ npm run preview
 Auth 配置：
 
 - Site URL 填正式网页地址 `https://crystalxhorizon.github.io/quiet-harbor/`。
-- Redirect URLs 添加正式网页地址；本地测试时另加 `http://127.0.0.1:4177/`。不要配置任意域名通配跳转。
+- Redirect URLs 添加正式网页地址和密码恢复地址 `https://crystalxhorizon.github.io/quiet-harbor/?account=recovery`；本地测试时另加 `http://127.0.0.1:4177/` 及 `http://127.0.0.1:4177/?account=recovery`。不要配置任意域名通配跳转。
 - 首版建议关闭公开注册，通过 Auth 用户管理发送邀请。前端的 `inviteOnly` 仅控制注册入口，真正的注册限制在 Supabase Auth 中设置。
 - 启用邮箱确认，配置发送验证、邀请、找回密码邮件的 SMTP。先测试实际收信及重置密码流程，再开放用户使用。
 - 启用 TOTP MFA。已绑定验证器的账户，密码登录后必须完成二次验证才能读取应用数据；审核、禁言、封禁、修改 AI 设置及角色等管理修改操作始终要求二次验证。
