@@ -5,3 +5,7 @@ node_modules/
 .sites-runtime/
 test-results/
 *.log
+
+dist/
+.supabase/
+supabase/.temp/

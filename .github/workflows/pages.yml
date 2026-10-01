@@ -1,12 +1,13 @@
 name: Check and publish frontend
 on:
   push:
-    branches: [main]
+    branches: [main, feature/community-backend]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   check:
@@ -16,12 +17,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      - run: npm ci
       - run: npm run check
       - run: npm test
-      - uses: actions/upload-pages-artifact@v3
+      - run: npm run build
+        env:
+          PUBLIC_SUPABASE_URL: ${{ vars.PUBLIC_SUPABASE_URL }}
+          PUBLIC_SUPABASE_ANON_KEY: ${{ vars.PUBLIC_SUPABASE_ANON_KEY }}
+          PUBLIC_INVITE_ONLY: ${{ vars.PUBLIC_INVITE_ONLY }}
+      - uses: actions/upload-artifact@v4
         with:
-          path: public
+          name: frontend-preview
+          path: dist
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: dist
   deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PUBLIC_SUPABASE_URL != '' && vars.PUBLIC_SUPABASE_ANON_KEY != ''
     needs: check
     runs-on: ubuntu-latest
     permissions:

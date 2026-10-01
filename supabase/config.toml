@@ -1,0 +1,8 @@
+project_id = "quiet-harbor"
+
+[auth]
+enable_signup = false
+
+[functions.api]
+# api validates the JWT against Supabase Auth for every request itself.
+verify_jwt = false

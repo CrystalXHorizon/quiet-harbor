@@ -14,9 +14,11 @@ test('direct connection rejects invalid keys and missing model',async()=>{
 test('direct harness exposes actionable errors without raw provider body',async()=>{
   await assert.rejects(runHarness([{role:'user',content:'hi'}],{AI_API_KEY:'fake'},{reportErrors:true,fetchImpl:async()=>new Response('private upstream data',{status:402})}),/余额不足/);
 });
-test('browser client has no backend configuration or persistent key storage',async()=>{
+test('browser chat only uses authenticated backend and exposes no vendor-key settings',async()=>{
   const js=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
   const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
-  assert.doesNotMatch(js,/\/api\/chat|\/api\/health|localStorage|sessionStorage|indexedDB|connection\.url/);
-  assert.doesNotMatch(html,/id="backend"|id="access-token"/);assert.match(html,/id="api-key"/);
+  assert.doesNotMatch(js,/runHarness|providerEnv|AI_API_KEY|verifyKey|encryptKey|decryptKey/);
+  assert.match(js,/backend\.api\('chat'/);
+  assert.doesNotMatch(html,/id="api-key"|id="access-token"|id="vault-password"/);
+  assert.match(html,/id="auth-dialog"/);
 });

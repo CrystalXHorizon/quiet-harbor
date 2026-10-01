@@ -1,1 +1,1 @@
-export * from './public/harness.js';
+export * from './supabase/functions/_shared/harness.js';
