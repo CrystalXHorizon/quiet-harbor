@@ -1,6 +1,7 @@
 import {build} from 'esbuild';
 import {mkdir,copyFile,readFile,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {createHash} from 'node:crypto';
 
 const target=resolve('dist');
 await mkdir(target,{recursive:true});
@@ -21,4 +22,12 @@ if(config.supabaseUrl||config.supabaseAnonKey){
 }
 await writeFile(resolve(target,'site-config.json'),JSON.stringify(config,null,2)+'\n');
 await build({entryPoints:['public/auth-panel.js'],outfile:resolve(target,'auth-bundle.js'),bundle:true,format:'esm',platform:'browser',target:['es2022'],minify:true,legalComments:'linked'});
+// GitHub Pages caches stable asset URLs. Version both the entry and its auth
+// dependency so a fresh page cannot keep running an older recovery flow.
+const digest=content=>createHash('sha256').update(content).digest('hex').slice(0,16);
+const authVersion=digest(await readFile(resolve(target,'auth-bundle.js')));
+const appSource=(await readFile(resolve(target,'app.js'),'utf8')).replace("'./auth-bundle.js'",`'./auth-bundle.js?v=${authVersion}'`);
+await writeFile(resolve(target,'app.js'),appSource);
+const page=(await readFile(resolve(target,'index.html'),'utf8')).replace('src="./app.js"',`src="./app.js?v=${digest(appSource)}"`);
+await writeFile(resolve(target,'index.html'),page);
 console.log(config.supabaseUrl?'Built configured frontend in dist/':'Built frontend in dist/ (backend not configured; local preview only)');
