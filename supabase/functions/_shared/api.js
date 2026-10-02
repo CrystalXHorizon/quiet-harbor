@@ -1,6 +1,7 @@
 import {runHarness,validateMessages,verifyKey} from './harness.js';
 import {providerEnv} from './providers.js';
 import {resolveSupabaseKeys} from './supabase-keys.js';
+import {generateInviteCode,hashInviteCode} from './security.js';
 import {ApiError,errorResponse,rpcError,allowedOrigins,safeProviderConfig,validateKey,encryptKey,decryptKey,readJson,verifiedAal2,validateAction} from './security.js';
 
 export function createApiHandler({env,fetchImpl=fetch}) {
@@ -49,6 +50,7 @@ export function createApiHandler({env,fetchImpl=fetch}) {
     let messages;try{messages=validateMessages(payload.messages);}catch{throw new ApiError('validation');}
     // qh_action me rechecks status on every request and rate-limits the gateway.
     const me=await rpc('me');if(me.profile.status==='banned')throw new ApiError('forbidden',403);
+    if(me.profile.admission_status!=='approved')throw new ApiError('admission_required',403);
     const reserved=await internalFetch('/rest/v1/rpc/qh_reserve_ai',{actor:user.id});
     const config=safeProviderConfig(reserved.config,env.AI_ALLOWED_HOSTS);
     const key=await decryptKey(reserved.encrypted_key,env.AI_ENCRYPTION_KEY,config);
@@ -75,6 +77,15 @@ export function createApiHandler({env,fetchImpl=fetch}) {
      if(key){securePayload.encrypted_key=await encryptKey(key,env.AI_ENCRYPTION_KEY,config);securePayload.key_last4=key.slice(-4);}
      result=await rpc('admin.ai.save',securePayload);
     }
+   }else if(input.action==='admin.invites.create'){
+    await rpc('admin.invites.list');if(!aal2)throw new ApiError('mfa_required',403);
+    const code=(payload.code||generateInviteCode()).trim().toUpperCase();
+    const {code:ignored,...safe}=payload;
+    result=await rpc(input.action,{...safe,code_hash:await hashInviteCode(code),code_hint:code.slice(-4)});
+    result={...result,code};
+   }else if(input.action==='admission.redeem'){
+    result=await rpc(input.action,{code_hash:await hashInviteCode(payload.code)});
+    if(result.error_code==='invite_invalid')throw new ApiError('invite_invalid');
    }else result=await rpc(input.action,payload);
    return new Response(JSON.stringify(result),{status:200,headers});
   }catch(error){const response=errorResponse(error);return new Response(JSON.stringify(response.body),{status:response.status,headers});}

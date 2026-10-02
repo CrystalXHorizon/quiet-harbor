@@ -29,7 +29,7 @@ Auth 配置：
 
 - Site URL 填正式网页地址 `https://crystalxhorizon.github.io/quiet-harbor/`。
 - Redirect URLs 添加正式网页地址和密码恢复地址 `https://crystalxhorizon.github.io/quiet-harbor/?account=recovery`；本地测试时另加 `http://127.0.0.1:4177/` 及 `http://127.0.0.1:4177/?account=recovery`。不要配置任意域名通配跳转。
-- 首版建议关闭公开注册，通过 Auth 用户管理发送邀请。前端的 `inviteOnly` 仅控制注册入口，真正的注册限制在 Supabase Auth 中设置。
+- 先应用全部数据库迁移、部署 API，再开启 Supabase Auth 的邮箱注册。新账户默认待审批：验证邮箱后提交申请，由站长或管理员审批；也可以兑换站长签发的有效邀请码免审批。邮箱验证仍然必需，邀请码不授予管理员权限。
 - 启用邮箱确认，配置发送验证、邀请、找回密码邮件的 SMTP。先测试实际收信及重置密码流程，再开放用户使用。
 - 启用 TOTP MFA。已绑定验证器的账户，密码登录后必须完成二次验证才能读取应用数据；审核、禁言、封禁、修改 AI 设置及角色等管理修改操作始终要求二次验证。
 
@@ -49,6 +49,16 @@ npx supabase db push
 确认目标是自己的新项目。迁移创建 `qh_` 前缀的业务表，不使用现有其他应用的数据表；如果目标项目已有同名表，应先核对迁移历史，不要强行覆盖。
 
 业务表开启 RLS，并撤销浏览器角色直接访问及执行内部 RPC 的权限。网页只能调用验证账户身份的 `api` 函数；普通用户无法用 SDK 直接更改角色、审核结果或密钥。
+
+### 从旧版升级申请制
+
+已有数据库仅执行尚未应用的 `202610010002_admission.sql`，不要重新执行初始建表脚本。随后更新 Edge Function，再发布前端，最后允许 Auth 邮箱注册。`build:rds` 生成的合并 SQL 用于空数据库；升级时使用单独的迁移文件。
+
+升级前已有账户保持已批准；新账户默认待审批。用户验证邮箱、登录后，在“我的账户”提交简短申请，或兑换邀请码。待审批账户不能读取社区或调用 AI。站长与管理员在后台审批，站长管理邀请码；管理修改操作需要二次验证。邀请码只免人工审批，不免邮箱验证，也不会解除封禁或授予管理角色。
+
+邀请码原文只在创建时显示一次，数据库保存哈希。请私下交给预期使用者；到期、停用或次数耗尽后不可兑换。申请理由只需描述使用意图，无需提供诊断或个人经历。
+
+公开接受申请前必须配置并验证邮件服务。Supabase 默认邮件服务可能仅向项目组织成员发送，不能作为公共注册投产依据；没有可用 SMTP 时，普通访客可能收不到验证邮件。不要通过关闭邮箱验证来绕过这个问题。
 
 ## 4. 设置服务端密钥并部署函数
 
@@ -86,7 +96,7 @@ npx supabase functions deploy api
 
 - `PUBLIC_SUPABASE_URL`：项目的 HTTPS URL。
 - `PUBLIC_SUPABASE_ANON_KEY`：publishable key 或 anon key。不能填写 service_role / secret key / AI Key。
-- `PUBLIC_INVITE_ONLY`：`true`（默认）或 `false`。开放注册时同时修改 Supabase Auth 注册策略。
+- `PUBLIC_INVITE_ONLY`：旧版兼容配置；新版使用申请与邀请码流程，不再用此字段隐藏注册入口。实际准入由数据库检查。
 
 构建会拒绝 service_role JWT 和 `sb_secret_` 私钥。GitHub Actions 只在 `main` 且前两项配置齐全时发布；功能分支只检查代码并生成预览构建包。
 
@@ -98,7 +108,7 @@ npx supabase functions deploy api
 
 ```sql
 update public.qh_profiles
-set role = 'owner'
+set role = 'owner', admission_status = 'approved'
 where id = 'REPLACE_WITH_YOUR_ACTUAL_AUTH_USER_UUID';
 ```
 

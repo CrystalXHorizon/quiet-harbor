@@ -26,8 +26,10 @@ await build({entryPoints:['public/auth-panel.js'],outfile:resolve(target,'auth-b
 // dependency so a fresh page cannot keep running an older recovery flow.
 const digest=content=>createHash('sha256').update(content).digest('hex').slice(0,16);
 const authVersion=digest(await readFile(resolve(target,'auth-bundle.js')));
-const appSource=(await readFile(resolve(target,'app.js'),'utf8')).replace("'./auth-bundle.js'",`'./auth-bundle.js?v=${authVersion}'`);
+const communityVersion=digest(await readFile(resolve(target,'community.js')));
+const appSource=(await readFile(resolve(target,'app.js'),'utf8')).replace("'./auth-bundle.js'",`'./auth-bundle.js?v=${authVersion}'`).replace("'./community.js'",`'./community.js?v=${communityVersion}'`);
 await writeFile(resolve(target,'app.js'),appSource);
-const page=(await readFile(resolve(target,'index.html'),'utf8')).replace('src="./app.js"',`src="./app.js?v=${digest(appSource)}"`);
+let page=(await readFile(resolve(target,'index.html'),'utf8')).replace('src="./app.js"',`src="./app.js?v=${digest(appSource)}"`);
+for(const css of ['style.css','community.css'])page=page.replace(`href="./${css}"`,`href="./${css}?v=${digest(await readFile(resolve(target,css)))}"`);
 await writeFile(resolve(target,'index.html'),page);
 console.log(config.supabaseUrl?'Built configured frontend in dist/':'Built frontend in dist/ (backend not configured; local preview only)');

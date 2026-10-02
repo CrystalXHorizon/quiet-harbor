@@ -11,6 +11,8 @@ do $$ declare a constant uuid:='11111111-1111-4111-8111-111111111111'; b constan
  p uuid; draft_id uuid; comment_id uuid; r jsonb; failed boolean;
 begin
  if (select role from public.qh_profiles where id=b)<>'member' then raise exception 'untrusted signup role used'; end if;
+ -- These fixtures represent previously admitted members.
+ update public.qh_profiles set admission_status='approved';
  -- No existing owner is allowed in a disposable test database.
  update public.qh_profiles set role='owner' where id=a;
  update public.qh_profiles set role='moderator' where id=m;

@@ -15,15 +15,16 @@ function openAccount(){if(backend)backend.open();else $('status').textContent='�
 function onAuthChange(state){
  const id=state?.user?.id||null;
  const profile=state?.profile;
- const access=[profile?.role,profile?.status].join(':');
+ const access=[profile?.role,profile?.status,profile?.admission_status].join(':');
  if(id!==currentAccountId){currentAccountId=id;resetChat();community?.reset();showView('chat');}
  else if(currentAccess!==access||Boolean(state?.mfaRequired)!==currentMfa){community?.reset();showView('chat');if(state?.mfaRequired)resetChat();else if(profile?.status==='banned')cancel();}
  currentAccess=access;
  currentMfa=Boolean(state?.mfaRequired);
  $('account-open').textContent=profile?.nickname||'登录 / 我的账户';
- $('admin-nav').hidden=profile?.status==='banned'||!['owner','moderator'].includes(profile?.role);
+ $('admin-nav').hidden=profile?.admission_status!=='approved'||profile?.status==='banned'||!['owner','moderator'].includes(profile?.role);
  $('mode-badge').textContent=currentMfa?'待二次验证':profile?.status==='banned'?'账户已停用':id?(state.ai?.ready?'AI 已就绪':'AI 暂未启用'):'本地体验';
  $('status').textContent=currentMfa?'请先在“我的账户”里完成二次验证，再继续聊天或访问社区。':profile?.status==='banned'?'此账户已停用，请联系站长。仍可查看本地练习。':id?(state.ai?.ready?'AI 由站点后台提供。聊天仅保留在本页；发送时会经过后台和 AI 服务商。':'已登录，站长尚未启用 AI 或账户信息暂不可用。'):'本地体验使用预设回复。登录后可使用站点提供的 AI。';
+ if(profile&&profile.status!=='banned'&&profile.admission_status!=='approved'){$('mode-badge').textContent=profile.admission_status==='rejected'?'申请暂未通过':'等待加入';$('status').textContent='请在“我的账户”中提交加入申请或使用邀请码。加入前可继续本地体验和小练习。';}
 }
 
 function cancelStrategy(){strategyPending?.abort();strategyPending=null;$('strategy-generate').disabled=false;$('strategy-stop').hidden=true;}
@@ -47,7 +48,7 @@ async function sendMessage() {
   if(session()?.mfaRequired&&quickRoute(text)!=='crisis'){openAccount();return;}
   $('message').value = ''; addMessage('user', text); history.push({ role:'user', content:text }); trimHistory();
   if (quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); return; }
-  if (!session()?.profile) { const reply = demoReply(text, history.filter(m => m.role === 'user').length - 1); addMessage('assistant', reply.text, '留岸 · 本地预设回复'); history.push({ role:'assistant', content:reply.text }); trimHistory(); $('status').textContent = '这是本地预设回复。要与 AI 对话，请先登录账户。'; return; }
+  if (!session()?.profile || (session().profile.status!=='banned'&&session().profile.admission_status!=='approved')) { const reply = demoReply(text, history.filter(m => m.role === 'user').length - 1); addMessage('assistant', reply.text, '留岸 · 本地预设回复'); history.push({ role:'assistant', content:reply.text }); trimHistory(); $('status').textContent = '这是本地预设回复。登录并通过加入申请，或使用邀请码后，可使用站点 AI。'; return; }
   const requestId = ++generation; const controller = new AbortController(); pending = controller; setBusy(true);
   $('status').textContent = '正在倾听，并检查回答是否合适……';
   const timeout = setTimeout(() => controller.abort(), 95000);
@@ -111,7 +112,7 @@ document.querySelectorAll('[data-practice-feedback]').forEach(b=>b.onclick=()=>{
 $('strategy-stop').onclick=()=>{cancelStrategy();$('strategy-result').textContent='已停止。你可以继续查看通用方法。';};
 $('strategy-generate').onclick=async()=>{
  if(strategyPending)return;
- if(!session()?.profile){$('strategy-result').textContent='登录后可以使用 AI 建议。上方通用方法可直接查看，不会发送聊天。';return;}
+ if(session()?.profile?.admission_status!=='approved'){$('strategy-result').textContent='登录并通过加入申请后可以使用 AI 建议。上方通用方法可直接查看，不会发送聊天。';return;}
  if(pending){$('strategy-result').textContent='请等这条聊天回复结束，或先停止回复。';return;}
  let messages;try{messages=strategyMessages(history);}catch(error){$('strategy-result').textContent=error.message;return;}
  const controller=new AbortController();strategyPending=controller;$('strategy-generate').disabled=true;$('strategy-stop').hidden=false;$('strategy-result').textContent='正在结合最近的聊天选择方法，并检查建议……';

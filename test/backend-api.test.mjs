@@ -150,7 +150,7 @@ test('chat uses only server config and reserves quota before three-stage harness
  const secret='server-secret-only';const encrypted_key=await encryptKey(secret,master,config);let stage=0;let reserved=false;
  const outputs=[{route:'support',mode:'listen'},'你可以接着说，我会跟着你说的内容聊。',{safe:true}];
  const {handler,calls}=mockHandler(c=>{
-  if(c.url.endsWith('/rpc/qh_action'))return json({profile:{status:'active'}});
+  if(c.url.endsWith('/rpc/qh_action'))return json({profile:{status:'active',admission_status:'approved'}});
   if(c.url.endsWith('/rpc/qh_reserve_ai')){reserved=true;assert.equal(JSON.parse(c.body).actor,userId);return json({config,encrypted_key});}
   assert.ok(reserved);assert.equal(c.url,'https://api.deepseek.com/chat/completions');assert.equal(c.headers.Authorization,'Bearer '+secret);assert.equal(c.redirect,'error');
   const output=outputs[stage++];return json({choices:[{finish_reason:'stop',message:{content:typeof output==='string'?output:JSON.stringify(output)}}]});
@@ -161,9 +161,39 @@ test('chat uses only server config and reserves quota before three-stage harness
 });
 test('quota or banned account stops before provider access; upstream details never leak',async()=>{
  for(const failure of ['quota_exceeded','forbidden']){
-  const {handler,calls}=mockHandler(c=>c.url.endsWith('/rpc/qh_action')?json({profile:{status:failure==='forbidden'?'banned':'active'}}):json({message:failure,details:'secret-should-not-leak'},400));
+  const {handler,calls}=mockHandler(c=>c.url.endsWith('/rpc/qh_action')?json({profile:{status:failure==='forbidden'?'banned':'active',admission_status:'approved'}}):json({message:failure,details:'secret-should-not-leak'},400));
   const res=await handler(request({action:'chat',messages:[{role:'user',content:'你好'}]}));
   assert.equal(res.status,failure==='quota_exceeded'?429:403);assert.ok(!(await res.text()).includes('secret-should-not-leak'));
   assert.ok(calls.every(c=>c.url.startsWith(env.SUPABASE_URL)));
  }
+});
+
+
+test('invite codes are generated or normalized, hashed only on server, permission checked before create',async()=>{
+ let saved;const {handler}=mockHandler(c=>{
+  const p=JSON.parse(c.body);
+  if(p.action==='admin.invites.list')return json({items:[]});
+  saved=p.payload;assert.equal(p.action,'admin.invites.create');assert.equal(p.aal2,true);return json({ok:true,id:userId});
+ });
+ const body={action:'admin.invites.create',label:'friends',max_uses:1,code:'Custom-Code-1234',code_hash:'attacker',code_hint:'oops'};
+ const denied=await handler(request(body));assert.equal(denied.status,403);assert.equal(saved,undefined);
+ const accepted=await handler(request(body,'aal2'));assert.equal(accepted.status,200);
+ assert.equal((await accepted.json()).code,'CUSTOM-CODE-1234');assert.equal(saved.code,undefined);assert.match(saved.code_hash,/^[a-f0-9]{64}$/);assert.equal(saved.code_hint,'1234');
+ const random=await handler(request({action:'admin.invites.create',label:'random',max_uses:2},'aal2'));
+ assert.match((await random.json()).code,/^[A-F0-9]{40}$/);
+ for(const bad of [{code:'short'},{max_uses:0},{max_uses:1.5},{expires_at:'2000-01-01'},{label:''}])assert.throws(()=>validateAction({...body,...bad}));
+});
+test('redemption strips plaintext and forged privileged fields; invalid attempts committed before safe response',async()=>{
+ let payload;const {handler}=mockHandler(c=>{
+  const p=JSON.parse(c.body);assert.equal(p.action,'admission.redeem');payload=p.payload;
+  return json({error_code:'invite_invalid'});
+ });
+ const res=await handler(request({action:'admission.redeem',code:'CUSTOM-CODE-1234',code_hash:'forged',admission_status:'approved'}));
+ assert.equal(res.status,400);assert.equal((await res.json()).code,'invite_invalid');
+ assert.deepEqual(Object.keys(payload),['code_hash']);assert.match(payload.code_hash,/^[a-f0-9]{64}$/);
+});
+test('pending applicant cannot cause quota reservation or provider calls',async()=>{
+ const {handler,calls}=mockHandler(c=>{assert.match(c.url,/rpc\/qh_action$/);return json({profile:{status:'active',admission_status:'pending'}});});
+ const res=await handler(request({action:'chat',messages:[{role:'user',content:'hello'}]}));
+ assert.equal(res.status,403);assert.equal((await res.json()).code,'admission_required');assert.equal(calls.length,2);
 });

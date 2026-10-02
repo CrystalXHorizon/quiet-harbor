@@ -25,7 +25,7 @@ function authError(error) {
   if (error?.isBackendError) return error.message;
   const messages = {
     invalid_credentials: '邮箱或密码不正确。', email_not_confirmed: '请先打开验证邮件确认邮箱，再回来登录。',
-    user_already_exists: '这个邮箱已经注册，可以直接登录或找回密码。', signup_disabled: '目前仅向受邀用户开放，请联系站长。',
+    user_already_exists: '这个邮箱已经注册，可以直接登录或找回密码。', signup_disabled: '申请入口暂未开放，请稍后再试或联系站长。',
     over_email_send_rate_limit: '邮件发送较频繁，请稍后再试。', over_request_rate_limit: '操作较频繁，请稍后再试。',
     weak_password: '密码强度不足，请使用至少 12 位、且不常见的密码。', same_password: '新密码不能与原密码相同。',
     mfa_verification_failed: '验证码不正确或已过期，请使用验证器里的新验证码。',
@@ -59,7 +59,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     const revision = viewId;
     const activeStatus = status;
     activeStatus.textContent = '正在处理……';
-    const controls = [...content.querySelectorAll('button, input')];
+    const controls = [...content.querySelectorAll('button, input, textarea')];
     controls.forEach(node => { node.disabled = true; });
     try {
       const result = await task();
@@ -100,9 +100,9 @@ export async function initAuth({ onChange = () => {} } = {}) {
     }
     const tabs = element('div', undefined, 'auth-tabs support-actions');
     tabs.append(button('登录', () => switchMode('login'), mode === 'login' ? 'primary' : 'secondary'));
-    if (!config.inviteOnly) tabs.append(button('注册', () => switchMode('signup'), mode === 'signup' ? 'primary' : 'secondary'));
+    tabs.append(button('申请加入', () => switchMode('signup'), mode === 'signup' ? 'primary' : 'secondary'));
     content.append(tabs);
-    if (config.inviteOnly && mode !== 'reset') content.append(element('p', '目前仅向受邀用户开放。已有账号可以直接登录；忘记密码请点击下方找回。'));
+    if (mode === 'signup') content.append(element('p', '先创建账户并验证邮箱，再填写加入申请。站长或管理员通过后即可使用社区和 AI；有有效邀请码可以免审核加入。'));
     const form = element('form', undefined, 'auth-form');
     const email = input(form, '邮箱', 'email', { type: 'email', autocomplete: 'email', maxLength: 254 });
     let password, nickname;
@@ -120,7 +120,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
         return backend.client.auth.signInWithPassword({ email: address, password: pass });
       }, async result => {
         if (mode === 'reset') { message('如果这个邮箱可以找回密码，你会收到邮件。请在这个浏览器中打开邮件链接。'); return; }
-        if (mode === 'signup' && !result.data?.session) { message('请查看邮箱中的验证邮件，完成后再来登录。若没有收到，请检查垃圾邮件。'); return; }
+        if (mode === 'signup' && !result.data?.session) { message('第一步已提交。请打开验证邮件确认邮箱，再登录“我的账户”填写申请或使用邀请码。若没有收到，请检查垃圾邮件。'); return; }
         await backend.refresh(); render(); message(backend.getSession()?.mfaRequired ? '密码已确认，还需要完成二次验证。' : '已登录。');
       });
     });
@@ -145,7 +145,8 @@ export async function initAuth({ onChange = () => {} } = {}) {
     if (profile?.status === 'banned') content.append(element('p', '账户已被停用。如有疑问，请联系站长。'));
     if (profile?.status === 'muted') content.append(element('p', '账户当前处于禁言状态，暂时不能发布或回复。'));
     if (session.usage) content.append(element('small', `今日 AI 用量：${Number(session.usage.used) || 0} / ${Number(session.usage.limit) || 0} 次。`));
-    if (profile) {
+    if (profile && profile.admission_status !== 'approved' && profile.status !== 'banned') renderAdmission(session);
+    if (profile?.admission_status === 'approved') {
       const form = element('form', undefined, 'auth-form');
       const nickname = input(form, '社区昵称', 'nickname', { autocomplete: 'nickname', value: profile.nickname || '', minLength: 2, maxLength: 30 });
       submit(form, '保存昵称', () => run(() => backend.api('profile.update', { nickname: nickname.value.trim() }), async () => { await backend.refresh(); render(); message('昵称已保存。'); }));
@@ -159,6 +160,24 @@ export async function initAuth({ onChange = () => {} } = {}) {
     if (!session.mfaRequired) actions.append(button('修改密码', () => { recovery = true; render(); }));
     actions.append(button('刷新账户状态', () => run(async () => { await backend.refresh(); }, () => render())), button('退出登录', () => run(() => backend.signOut(), () => { recovery = false; mode = 'login'; render(); message('已退出登录。'); })));
     content.append(element('small', '聊天正文不会随账户同步。请在共享设备上使用后退出登录。'), actions);
+  }
+  function renderAdmission(session) {
+    const application = session.application;
+    const section = element('section', undefined, 'auth-mfa');
+    section.append(element('h3', session.profile.admission_status === 'rejected' ? '申请暂未通过' : application ? '申请等待审核' : '完成加入申请'));
+    section.append(element('p', '加入前仍可使用本地体验和小练习。通过审核或使用有效邀请码后，才会开放社区和站点 AI。'));
+    if (application?.review_reason) section.append(element('p', `审核说明：${application.review_reason}`));
+    const form = element('form', undefined, 'auth-form');
+    const label = element('label', '简单介绍你希望如何使用这里');
+    const reason = element('textarea'); reason.id = 'auth-application-reason'; label.htmlFor = reason.id;
+    reason.required = true; reason.maxLength = 1000; reason.rows = 3; reason.value = application?.reason || '';
+    form.append(label, reason, element('small', '不需要提供诊断、病历或其他私密经历。申请说明仅供站长和管理员审核。'));
+    submit(form, application ? '更新并提交申请' : '提交加入申请', () => run(() => backend.api('admission.apply', { reason: reason.value.trim() }), async () => { await backend.refresh(); render(); message('申请已提交，请等待审核。可以使用“刷新账户状态”查看进展。'); }));
+    const invite = element('form', undefined, 'auth-form');
+    const code = input(invite, '已有邀请码？', 'invitation-code', { type: 'password', minLength: 12, maxLength: 80 });
+    invite.append(element('small', '邀请码免人工审核，但仍需完成邮箱验证。请勿公开分享邀请码。'));
+    submit(invite, '使用邀请码加入', () => { const value = code.value.trim(); code.value = ''; return run(() => backend.api('admission.redeem', { code: value }), async () => { await backend.refresh(); render(); message('邀请码已使用，欢迎加入。'); }); });
+    section.append(form, invite); content.append(section);
   }
   async function showMfa(container) {
     await run(async () => {
@@ -231,7 +250,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
       onChange: session => {
         onChange(session);
         // Do not replace a form while the user is typing or completing a request.
-        if (dialog.open && !pending && mode !== 'reset' && !recovery && !enrolled && !factorId && document.activeElement?.tagName !== 'INPUT') render();
+        if (dialog.open && !pending && mode !== 'reset' && !recovery && !enrolled && !factorId && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !document.activeElement?.isContentEditable) render();
       },
       onAuthEvent: event => {
         if (event === 'PASSWORD_RECOVERY') { recovery = true; open(); }
