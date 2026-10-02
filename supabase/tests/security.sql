@@ -100,6 +100,29 @@ begin
  if exists(select 1 from public.qh_audit where reason like '%SECRET_CIPHERTEXT%' or reason like '%Approved body%') then raise exception 'sensitive audit data';end if;
 end $$;
 
+-- Owner publishing uses the stored role, preserves drafts, and cannot edit another author.
+do $$ declare a uuid:='11111111-1111-4111-8111-111111111111'; b uuid:='22222222-2222-4222-8222-222222222222'; m uuid:='33333333-3333-4333-8333-333333333333';
+ r jsonb; pid uuid; fields jsonb:='{"title":"Owner post","body":"Version one","category":"share","preference":"listen"}'; denied boolean;
+begin
+ r:=public.qh_action(a,'posts.save',fields||'{"submit":false}');pid:=(r->>'id')::uuid;
+ if (select status from public.qh_posts where id=pid)<>'draft' then raise exception 'owner draft published'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'submit',true));
+ if (select status from public.qh_posts where id=pid)<>'published' then raise exception 'owner post awaits review'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Version two','submit',true));
+ if (select body from public.qh_posts where id=pid)<>'Version two' then raise exception 'owner edit awaits review'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Private draft','submit',false));
+ if (select body from public.qh_posts where id=pid)<>'Version two' or (select revision_status from public.qh_posts where id=pid)<>'draft' then raise exception 'owner draft revision leaked'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Final','submit',true));
+ if (select pending_revision from public.qh_posts where id=pid) is not null then raise exception 'owner stale revision'; end if;
+ denied:=false;begin perform public.qh_action(b,'posts.save',fields||jsonb_build_object('id',pid,'submit',true));exception when others then denied:=sqlerrm='not_found';end;
+ if not denied then raise exception 'other author edited owner post'; end if;
+ r:=public.qh_action(m,'posts.save',fields||'{"submit":true,"role":"owner"}');
+ if (select status from public.qh_posts where id=(r->>'id')::uuid)<>'pending' then raise exception 'moderator bypassed review'; end if;
+ r:=public.qh_action(b,'posts.save',fields||'{"submit":true,"role":"owner"}');
+ if (select status from public.qh_posts where id=(r->>'id')::uuid)<>'pending' then raise exception 'member bypassed review'; end if;
+ if not exists(select 1 from public.qh_audit where action='posts.owner_publish' and target_id=pid) then raise exception 'owner publication audit absent'; end if;
+end $$;
+
 -- Actual low-privilege execution: grants must fail, regardless of RLS policy defaults.
 set local role authenticated;
 do $$ declare denied boolean; begin
