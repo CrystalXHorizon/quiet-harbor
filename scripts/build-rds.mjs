@@ -1,5 +1,5 @@
 import {build} from 'esbuild';
-import {mkdir,copyFile} from 'node:fs/promises';
+import {mkdir,readdir,readFile,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 
 // Keep deployment artifacts outside dist/, which is published to GitHub Pages.
@@ -11,5 +11,6 @@ await build({
  bundle:true,format:'esm',platform:'neutral',target:['es2022'],
  minify:false,legalComments:'inline'
 });
-await copyFile('supabase/migrations/202610010001_quiet_harbor.sql',resolve(target,'quiet-harbor.sql'));
+const migrations=(await readdir('supabase/migrations')).filter(name=>name.endsWith('.sql')).sort();
+await writeFile(resolve(target,'quiet-harbor.sql'),(await Promise.all(migrations.map(name=>readFile(resolve('supabase/migrations',name),'utf8')))).join('\n\n'));
 console.log('RDS deployment files ready in .supabase/rds-deploy (no credentials included)');

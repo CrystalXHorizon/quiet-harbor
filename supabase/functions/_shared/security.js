@@ -4,7 +4,7 @@ export class ApiError extends Error {
  constructor(code, status=400) { super(code); this.code=code; this.status=status; }
 }
 const messages={
- unauthorized:'登录已失效，请重新登录。', forbidden:'当前账户没有这项操作的权限。',
+ unauthorized:'登录已失效，请重新登录。', forbidden:'当前账户没有这项操作的权限。', admission_required:'账户尚未通过申请审核。', invite_invalid:'邀请码无效、已停用、过期或已用完。',
  mfa_required:'请先完成两步验证，再继续使用账户。', muted:'账户暂时不能发布内容，请联系管理员。',
  not_found:'内容不存在，或当前无法访问。', validation:'填写的内容或参数不符合要求，请检查后重试。',
  rate_limit:'操作太频繁了，请稍后再试。', quota_exceeded:'今日 AI 使用额度已用完，请明天再来。',
@@ -19,7 +19,7 @@ export function errorResponse(error) {
 }
 export function rpcError(error) {
  const code=String(error?.message||'');
- if(Object.hasOwn(messages,code))return new ApiError(code,['forbidden','muted','mfa_required','self_moderation'].includes(code)?403:code==='unauthorized'?401:code==='not_found'?404:['rate_limit','quota_exceeded'].includes(code)?429:code==='not_configured'?503:400);
+ if(Object.hasOwn(messages,code))return new ApiError(code,['forbidden','admission_required','muted','mfa_required','self_moderation'].includes(code)?403:code==='unauthorized'?401:code==='not_found'?404:['rate_limit','quota_exceeded'].includes(code)?429:code==='not_configured'?503:400);
  if(error?.code==='23505')return new ApiError('duplicate',409);
  if(['23502','23503','23514','22P02','22003'].includes(error?.code))return new ApiError('validation');
  return new ApiError('internal',500);
@@ -91,11 +91,20 @@ export function validateAction(input) {
  for(const key of ['mine','bookmarked','submit','open','enabled'])if(p[key]!==undefined&&typeof p[key]!=='boolean')throw new ApiError('validation');
  if(p.page!==undefined&&(!Number.isInteger(p.page)||p.page<0||p.page>1000))throw new ApiError('validation');
  for(const [key,max] of [['nickname',40],['title',120],['body',input.action==='comments.save'?3000:6000],['reason',1000]])if(p[key]!==undefined&&(typeof p[key]!=='string'||!p[key].trim()||p[key].length>max))throw new ApiError('validation');
- for(const [key,allowed] of [['category',['share','advice','progress']],['preference',['listen','advice']],['status',['active','muted','banned']],['role',['member','moderator']]])if(p[key]!==undefined&&!allowed.includes(p[key]))throw new ApiError('validation');
+ for(const [key,allowed] of [['category',['share','advice','progress']],['preference',['listen','advice']],['status',input.action==='admin.application.review'?['approved','rejected']:['active','muted','banned']],['role',['member','moderator']]])if(p[key]!==undefined&&!allowed.includes(p[key]))throw new ApiError('validation');
  if(input.action==='reports.create'&&Number(!!p.post_id)+Number(!!p.comment_id)!==1)throw new ApiError('validation');
  if(input.action==='admin.user'&&p.role===undefined&&p.status===undefined)throw new ApiError('validation');
  for(const [key,max] of [['user_daily_limit',1000],['global_daily_limit',100000]])if(p[key]!==undefined&&(!Number.isInteger(p[key])||p[key]<1||p[key]>max))throw new ApiError('validation');
  // Privileged values are exclusively manufactured server-side.
- delete p.encrypted_key;delete p.key_last4;delete p.actor;delete p.aal2;
+ delete p.encrypted_key;delete p.key_last4;delete p.actor;delete p.aal2;delete p.code_hash;delete p.code_hint;
+ const admissionRequired={'admission.apply':['reason'],'admission.redeem':['code'],'admin.application.review':['id','status','reason'],'admin.invites.create':['label','max_uses'],'admin.invites.update':['id','enabled']}[input.action]||[];
+ if(admissionRequired.some(key=>p[key]===undefined))throw new ApiError('validation');
+ if(p.code!==undefined&&(typeof p.code!=='string'||!/^[A-Za-z0-9-]{12,80}$/.test(p.code.trim())))throw new ApiError('validation');
+ if(p.label!==undefined&&(typeof p.label!=='string'||!p.label.trim()||p.label.length>80))throw new ApiError('validation');
+ if(p.max_uses!==undefined&&(!Number.isInteger(p.max_uses)||p.max_uses<1||p.max_uses>10000))throw new ApiError('validation');
+ if(p.expires_at!==undefined&&p.expires_at!==null&&(typeof p.expires_at!=='string'||!Number.isFinite(Date.parse(p.expires_at))||Date.parse(p.expires_at)<=Date.now()))throw new ApiError('validation');
  return p;
 }
+for(const action of ['admission.apply','admission.redeem','admin.applications','admin.application.review','admin.invites.list','admin.invites.create','admin.invites.update'])ACTIONS.add(action);
+export function generateInviteCode(){return Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('');}
+export async function hashInviteCode(code){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code.trim().toUpperCase()))),x=>x.toString(16).padStart(2,'0')).join('');}

@@ -133,7 +133,7 @@ export function createBackendClient(config, { createClient, fetchImpl = fetch, o
     try {
       const details = await api('me');
       if (disposed || requestEpoch !== epoch || requestRevision !== refreshVersion) return session;
-      session = { user, profile: details.profile || null, ai: details.ai || null, usage: details.usage || null };
+      session = { user, profile: details.profile || null, ai: details.ai || null, usage: details.usage || null, application: details.application || null };
     } catch (error) {
       if (disposed || requestEpoch !== epoch || requestRevision !== refreshVersion || error.name === 'AbortError') return session;
       session = { user, profile: null, ai: null, usage: null, error: error.message, ...(error.code === 'mfa_required' ? { mfaRequired: true } : {}) };

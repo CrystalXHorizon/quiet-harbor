@@ -11,9 +11,16 @@ do $$ declare a constant uuid:='11111111-1111-4111-8111-111111111111'; b constan
  p uuid; draft_id uuid; comment_id uuid; r jsonb; failed boolean;
 begin
  if (select role from public.qh_profiles where id=b)<>'member' then raise exception 'untrusted signup role used'; end if;
+ -- These fixtures represent previously admitted members.
+ update public.qh_profiles set admission_status='approved';
  -- No existing owner is allowed in a disposable test database.
  update public.qh_profiles set role='owner' where id=a;
  update public.qh_profiles set role='moderator' where id=m;
+ -- Empty dashboards still execute every query branch and must return valid data.
+ r:=public.qh_action(a,'admin.queue');
+ if r <> '{"posts":[],"comments":[],"reports":[],"appeals":[]}'::jsonb then raise exception 'unexpected empty queue'; end if;
+ r:=public.qh_action(a,'admin.usage');
+ if (r->>'total')::integer<>0 or r->'users'<>'[]'::jsonb then raise exception 'unexpected empty usage'; end if;
  if has_table_privilege('authenticated','public.qh_ai_settings','select') then raise exception 'ciphertext table readable by browser'; end if;
  if has_table_privilege('anon','public.qh_posts','select') then raise exception 'anonymous table access'; end if;
  if has_function_privilege('authenticated','public.qh_action(uuid,text,jsonb,boolean)','execute') then raise exception 'actor RPC callable by browser'; end if;
@@ -51,6 +58,11 @@ begin
  if not failed then raise exception 'nonowner deleted post'; end if;
 
  r:=public.qh_action(o,'comments.save',jsonb_build_object('post_id',p,'body','Unreviewed comment'));comment_id:=(r->>'id')::uuid;
+ perform public.qh_action(o,'reports.create',jsonb_build_object('post_id',p,'reason','review post'));
+ r:=public.qh_action(m,'admin.queue');
+ if jsonb_array_length(r->'comments')<>1 or jsonb_array_length(r->'reports')<>1 or jsonb_array_length(r->'appeals')<>1 then raise exception 'populated moderation queue incomplete'; end if;
+ if r->'reports'->0->>'target_body'<>'Approved body' or r->'appeals'->0->>'target_title'<>'Original' then raise exception 'queue joined wrong record'; end if;
+ if r::text like '%PRIVATE DRAFT%' then raise exception 'queue exposes draft'; end if;
  r:=public.qh_action(b,'posts.get',jsonb_build_object('id',p));if jsonb_array_length(r->'comments')<>0 then raise exception 'pending comment leaked';end if;
  perform public.qh_action(m,'admin.moderate',jsonb_build_object('kind','comment','id',comment_id,'decision','approve','reason','ok'),true);
  r:=public.qh_action(b,'posts.get',jsonb_build_object('id',p));if jsonb_array_length(r->'comments')<>1 then raise exception 'approved comment missing';end if;
@@ -81,8 +93,34 @@ begin
  failed:=false;begin perform public.qh_reserve_ai(a);exception when others then failed:=sqlerrm='quota_exceeded';end;
  if not failed then raise exception 'global quota bypass';end if;
  if (select sum(used) from public.qh_usage)<>2 then raise exception 'failed quota reservation changed usage';end if;
+ r:=public.qh_action(a,'admin.usage');
+ if (r->>'total')::integer<>2 or jsonb_array_length(r->'users')<>2 then raise exception 'usage totals wrong'; end if;
+ if not exists(select 1 from jsonb_array_elements(r->'users') x where x->>'nickname'='member' and (x->>'used')::integer=1) then raise exception 'usage member join wrong'; end if;
  if not exists(select 1 from public.qh_audit where action='ai.save') then raise exception 'audit absent';end if;
  if exists(select 1 from public.qh_audit where reason like '%SECRET_CIPHERTEXT%' or reason like '%Approved body%') then raise exception 'sensitive audit data';end if;
+end $$;
+
+-- Owner publishing uses the stored role, preserves drafts, and cannot edit another author.
+do $$ declare a uuid:='11111111-1111-4111-8111-111111111111'; b uuid:='22222222-2222-4222-8222-222222222222'; m uuid:='33333333-3333-4333-8333-333333333333';
+ r jsonb; pid uuid; fields jsonb:='{"title":"Owner post","body":"Version one","category":"share","preference":"listen"}'; denied boolean;
+begin
+ r:=public.qh_action(a,'posts.save',fields||'{"submit":false}');pid:=(r->>'id')::uuid;
+ if (select status from public.qh_posts where id=pid)<>'draft' then raise exception 'owner draft published'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'submit',true));
+ if (select status from public.qh_posts where id=pid)<>'published' then raise exception 'owner post awaits review'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Version two','submit',true));
+ if (select body from public.qh_posts where id=pid)<>'Version two' then raise exception 'owner edit awaits review'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Private draft','submit',false));
+ if (select body from public.qh_posts where id=pid)<>'Version two' or (select revision_status from public.qh_posts where id=pid)<>'draft' then raise exception 'owner draft revision leaked'; end if;
+ perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Final','submit',true));
+ if (select pending_revision from public.qh_posts where id=pid) is not null then raise exception 'owner stale revision'; end if;
+ denied:=false;begin perform public.qh_action(b,'posts.save',fields||jsonb_build_object('id',pid,'submit',true));exception when others then denied:=sqlerrm='not_found';end;
+ if not denied then raise exception 'other author edited owner post'; end if;
+ r:=public.qh_action(m,'posts.save',fields||'{"submit":true,"role":"owner"}');
+ if (select status from public.qh_posts where id=(r->>'id')::uuid)<>'pending' then raise exception 'moderator bypassed review'; end if;
+ r:=public.qh_action(b,'posts.save',fields||'{"submit":true,"role":"owner"}');
+ if (select status from public.qh_posts where id=(r->>'id')::uuid)<>'pending' then raise exception 'member bypassed review'; end if;
+ if not exists(select 1 from public.qh_audit where action='posts.owner_publish' and target_id=pid) then raise exception 'owner publication audit absent'; end if;
 end $$;
 
 -- Actual low-privilege execution: grants must fail, regardless of RLS policy defaults.
