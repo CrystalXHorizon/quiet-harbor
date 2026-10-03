@@ -111,4 +111,4 @@
     6. 前端只在**后端不可用**时（MFA 未完成／未登录／未通过审核／请求失败）使用本地危机文案；
     7. 新增 `mandatoryOutputCheck`：这条路**不能复用** `basicOutputCheck`——实测后者会把“我不能帮你切换到另一个人格”“不能建议你停用药物”“我不能保证你一定会治愈”这三句**正确的**拒绝判成违规，直接退回固定文案，等于修不好 bug A。
   - **保留固定文案的三处，不改成生成**：`PAUSE_TEXT` 的语义就是“没能产出合格回复”，再用模型生成自相矛盾；`demoReply` 是纯离线体验模式；前端本地兜底在无后端时只能靠常量。
-  - **测试**：新增 `test/safety-reply.test.mjs`（8 项：两个 bug 的回归、生成路径、回退路径、误杀回归、两份 harness 一致性）。`immediate crisis bypasses provider entirely` 更名为 `crisis still yields the fixed text when no reply can be generated`；边界用例补注入离线 fetch（原先它会真实联网）。
+  - **测试**：新增 `test/safety-reply.test.mjs`（11 项：两个 bug 的回归、生成路径、回退路径、误杀回归、两份 harness 一致性）。`immediate crisis bypasses provider entirely` 更名为 `crisis still yields the fixed text when no reply can be generated`；边界用例补注入离线 fetch（原先它会真实联网）。
