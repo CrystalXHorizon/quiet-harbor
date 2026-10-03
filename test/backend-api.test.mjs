@@ -15,6 +15,16 @@ const request=(body,aal='aal1',headers={})=>new Request('https://example.supabas
 const json=(value,status=200)=>Response.json(value,{status});
 function mockHandler(handle){const calls=[];return {calls,handler:createApiHandler({env,fetchImpl:async(url,options)=>{const c={url:String(url),...options};calls.push(c);if(c.url.endsWith('/auth/v1/user'))return json(user);return handle(c);}})};}
 
+test('personal endpoints use verified actor and profile updates cannot change privileges',async()=>{
+ for(const [action,payload] of [['personal.overview',{}],['personal.comments',{page:1}],['personal.appeals',{}],['personal.bookmarks',{}],['notifications.list',{}],['notifications.read',{id:userId}],['notifications.read_all',{}],['bookmarks.remove',{post_id:userId}],['profiles.get',{user_id:userId}],['profile.update',{avatar:'leaf',bio:'',public_bio:false}]]){
+  const {handler}=mockHandler(call=>{const body=JSON.parse(call.body);assert.equal(body.actor,userId);assert.equal(body.action,action);assert.deepEqual(body.payload,payload);return json({ok:true});});
+  const response=await handler(request({action,...payload,actor:'untrusted',aal2:true}));assert.equal(response.status,200);
+ }
+ assert.deepEqual(validateAction({action:'profile.update',nickname:'我的昵称',role:'owner',status:'active',admission_status:'approved'}),{nickname:'我的昵称'});
+ for(const payload of [{},{avatar:'https://example.com/a.png'},{bio:'x'.repeat(201)},{public_bio:'true'},{nickname:''}])assert.throws(()=>validateAction({action:'profile.update',...payload}));
+ for(const body of [{action:'notifications.read'},{action:'profiles.get'},{action:'bookmarks.remove'},{action:'notifications.list',page:-1},{action:'personal.comments',page:0.5}])assert.throws(()=>validateAction(body));
+});
+
 test('post and reply appeals reach the authenticated RPC with exactly one target',async()=>{
  for(const target of [{post_id:userId},{comment_id:userId}]){
   const {handler}=mockHandler(call=>{

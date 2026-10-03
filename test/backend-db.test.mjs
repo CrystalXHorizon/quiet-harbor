@@ -11,5 +11,6 @@ test('real Postgres migration: deny browser access, authorize roles, isolate rev
   const migrations=new URL('../supabase/migrations/',import.meta.url);
   for(const file of (await readdir(migrations)).filter(f=>f.endsWith('.sql')).sort())await db.exec(await readFile(new URL(file,migrations),'utf8'));
   await db.exec(await readFile(new URL('../supabase/tests/security.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../supabase/tests/personal.sql',import.meta.url),'utf8'));
  }finally{await db.close();}
 });

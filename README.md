@@ -19,6 +19,7 @@
 
 - **陪伴对话**：说今天发生了什么，AI 接着具体的事回应。历史只留在当前页面内存里，刷新即清空；应用不建聊天内容表。
 - **互助社区**：帖子、回应、收藏、屏蔽、举报、申诉。成员分普通成员／社区管理员／站长三级，加入需要申请或邀请码。
+- **个人中心**：「我的」集中管理自己的帖子、回复、收藏和申诉，显示审核说明、恢复结果与处理时间。审核结果、收到回复、申诉处理和账户变化会生成私人站内通知；支持预设头像、简介和公开资料预览，简介默认不公开。
 - **可选练习**：8 种「回到这一刻」的感官与问题解决小方法，参考 WHO / NHS 的一般压力应对材料改编，随时可以停。
 - **账户体系**：邮箱验证 → 加入申请 → 审批；支持邀请码免审核、找回密码、TOTP 二次验证。
 
@@ -154,7 +155,7 @@ Edge Function  api                    ← 唯一后端入口
 ```sh
 npm ci
 npm run check     # 语法检查 + 断言浏览器不直接调模型
-npm test          # 74 项自动化测试
+npm test          # 75 项自动化测试
 npm start         # 构建并启动本地预览 http://127.0.0.1:4177/
 ```
 
@@ -230,9 +231,9 @@ npm start         # 构建并启动本地预览 http://127.0.0.1:4177/
 | `supabase/functions/_shared/harness.js` | 对话 Harness：路由、生成、格式闸门、复核、回退 |
 | `supabase/functions/_shared/api.js` | Edge Function 的业务入口：身份、权限、额度、审核编排 |
 | `supabase/functions/_shared/security.js` | Origin、参数校验、错误映射、密钥加解密 |
-| `supabase/migrations/` | 16 张业务表、RLS、`qh_action` 业务入口与配额逻辑 |
+| `supabase/migrations/` | 17 张业务表、RLS、`qh_action` 业务入口与配额逻辑 |
 | `supabase/tests/security.sql` | 数据库权限断言 |
-| `test/` | 74 项自动化测试（API、数据库、认证、协议、Harness） |
+| `test/` | 75 项自动化测试（API、数据库、认证、协议、Harness） |
 | `evals/conversation.md` | 对话质量验收案例 + 每轮改动的版本记录 |
 | `scripts/` | 构建、预览、语法检查、浏览器联调 |
 | `DEPLOY.md` | Supabase 托管项目部署步骤与上线验收清单 |

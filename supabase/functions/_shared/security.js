@@ -83,13 +83,19 @@ export function validateAction(input) {
  const p={...input};delete p.action;
  for(const key of ['id','post_id','comment_id','user_id'])if(p[key]!==undefined&&(typeof p[key]!=='string'||!uuid.test(p[key])))throw new ApiError('validation');
  const required={
-  'profile.update':['nickname'],'posts.get':['id'],'posts.save':['title','body','category','preference','submit'],'posts.delete':['id'],'posts.comments':['id','open'],
+  'profiles.get':['user_id'],'notifications.read':['id'],'bookmarks.remove':['post_id'],'posts.get':['id'],'posts.save':['title','body','category','preference','submit'],'posts.delete':['id'],'posts.comments':['id','open'],
   'comments.save':['post_id','body'],'comments.delete':['id'],'bookmarks.toggle':['post_id'],'blocks.toggle':['user_id'],'reports.create':['reason'],
   'appeals.create':['reason'],'admin.moderate':['kind','id','decision','reason'],'admin.user':['id','reason'],
   'admin.ai.save':['config','enabled','user_daily_limit','global_daily_limit'],'admin.ai.test':['config'],'chat':['messages']
  }[input.action]||[];
  if(required.some(key=>p[key]===undefined))throw new ApiError('validation');
- for(const key of ['mine','bookmarked','submit','open','enabled'])if(p[key]!==undefined&&typeof p[key]!=='boolean')throw new ApiError('validation');
+ for(const key of ['mine','bookmarked','submit','open','enabled','public_bio'])if(p[key]!==undefined&&typeof p[key]!=='boolean')throw new ApiError('validation');
+ if(input.action==='profile.update'){
+  if(!['nickname','avatar','bio','public_bio'].some(key=>p[key]!==undefined))throw new ApiError('validation');
+  if(p.avatar!==undefined&&!['harbor','leaf','moon','sun','wave','star'].includes(p.avatar))throw new ApiError('validation');
+  if(p.bio!==undefined&&(typeof p.bio!=='string'||p.bio.length>200))throw new ApiError('validation');
+  for(const key of Object.keys(p))if(!['nickname','avatar','bio','public_bio'].includes(key))delete p[key];
+ }
  if(p.page!==undefined&&(!Number.isInteger(p.page)||p.page<0||p.page>1000))throw new ApiError('validation');
  for(const [key,max] of [['nickname',40],['title',120],['body',input.action==='comments.save'?3000:6000],['reason',1000]])if(p[key]!==undefined&&(typeof p[key]!=='string'||!p[key].trim()||p[key].length>max))throw new ApiError('validation');
  for(const [key,allowed] of [['category',['share','advice','progress']],['preference',['listen','advice']],['status',input.action==='admin.application.review'?['approved','rejected']:['active','muted','banned']],['role',['member','moderator']]])if(p[key]!==undefined&&!allowed.includes(p[key]))throw new ApiError('validation');
@@ -107,6 +113,6 @@ export function validateAction(input) {
  if(p.expires_at!==undefined&&p.expires_at!==null&&(typeof p.expires_at!=='string'||!Number.isFinite(Date.parse(p.expires_at))||Date.parse(p.expires_at)<=Date.now()))throw new ApiError('validation');
  return p;
 }
-for(const action of ['admission.apply','admission.redeem','admin.applications','admin.application.review','admin.invites.list','admin.invites.create','admin.invites.update'])ACTIONS.add(action);
+for(const action of ['admission.apply','admission.redeem','admin.applications','admin.application.review','admin.invites.list','admin.invites.create','admin.invites.update','personal.overview','personal.comments','personal.appeals','personal.bookmarks','notifications.list','notifications.read','notifications.read_all','profiles.get','bookmarks.remove'])ACTIONS.add(action);
 export function generateInviteCode(){return Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('');}
 export async function hashInviteCode(code){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code.trim().toUpperCase()))),x=>x.toString(16).padStart(2,'0')).join('');}

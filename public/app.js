@@ -1,27 +1,31 @@
 import {initAuth} from './auth-bundle.js';
 import {initCommunity} from './community.js';
+import {initPersonal} from './personal.js';
 import { quickRoute, demoReply, CRISIS_TEXT } from './safety.js';
 import {strategies,strategyMessages} from './strategies.js';
 const $ = id => document.getElementById(id);
 let history = [], pending = null, generation = 0, step = 0, started = Date.now();
-let strategyPending=null, backend=null, community=null, currentAccountId=null, currentAccess='', currentMfa=false;
+let strategyPending=null, backend=null, community=null, personal=null, currentAccountId=null, currentAccess='', currentMfa=false;
 const session=()=>backend?.getSession();
 function showView(name){
- $('chat-view').hidden=name!=='chat';$('community-view').hidden=name!=='community';$('admin-view').hidden=name!=='admin';
- for(const id of ['chat','community','admin']){const b=$(id+'-nav');b.classList.toggle('active',id===name);if(id===name)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');}
- $('current-view-label').textContent={chat:'与我聊聊',community:'互助社区',admin:'管理后台'}[name];
+ for(const id of ['chat','community','personal','admin']){$(id+'-view').hidden=id!==name;const b=$(id+'-nav');b.classList.toggle('active',id===name);if(id===name)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');}
+ $('current-view-label').textContent={chat:'与我聊聊',community:'互助社区',personal:'我的',admin:'管理后台'}[name];
 }
+function openPersonal(tab){if(!personal){openAccount();return;}showView('personal');void personal.showPersonal(tab);}
+function setUnread(value){const count=Number.isFinite(value)?value:0;const badge=$('notification-count');badge.hidden=count===0;badge.textContent=count>99?'99+':String(count);$('notifications-open').setAttribute('aria-label',count?`通知，${count} 条未读`:'通知');}
 function openAccount(){if(backend)backend.open();else $('status').textContent='账户功能正在加载，请稍后再试。';}
 function onAuthChange(state){
  const id=state?.user?.id||null;
  const profile=state?.profile;
  const access=[profile?.role,profile?.status,profile?.admission_status].join(':');
- if(id!==currentAccountId){currentAccountId=id;resetChat();community?.reset();showView('chat');}
- else if(currentAccess!==access||Boolean(state?.mfaRequired)!==currentMfa){community?.reset();showView('chat');if(state?.mfaRequired)resetChat();else if(profile?.status==='banned')cancel();}
+ if(id!==currentAccountId){currentAccountId=id;resetChat();community?.reset();personal?.reset();setUnread(0);showView('chat');}
+ else if(currentAccess!==access||Boolean(state?.mfaRequired)!==currentMfa){community?.reset();personal?.reset();setUnread(0);showView('chat');if(state?.mfaRequired)resetChat();else if(profile?.status==='banned')cancel();}
  currentAccess=access;
  currentMfa=Boolean(state?.mfaRequired);
  $('account-open').textContent=profile?.nickname||'登录 / 我的账户';
  $('admin-nav').hidden=profile?.admission_status!=='approved'||profile?.status==='banned'||!['owner','moderator'].includes(profile?.role);
+ $('notifications-open').hidden=!profile||profile.admission_status!=='approved'||profile.status==='banned'||currentMfa;
+ if(!$('notifications-open').hidden)void personal?.refreshUnread();
  $('mode-badge').textContent=currentMfa?'待二次验证':profile?.status==='banned'?'账户已停用':id?(state.ai?.ready?'AI 已就绪':'AI 暂未启用'):'本地体验';
  $('status').textContent=currentMfa?'请先在“我的账户”里完成二次验证，再继续聊天或访问社区。':profile?.status==='banned'?'此账户已停用，请联系站长。仍可查看本地练习。':id?(state.ai?.ready?'AI 由站点后台提供。聊天仅保留在本页；发送时会经过后台和 AI 服务商。':'已登录，站长尚未启用 AI 或账户信息暂不可用。'):'本地体验使用预设回复。登录后可使用站点提供的 AI。';
  if(profile&&profile.status!=='banned'&&profile.admission_status!=='approved'){$('mode-badge').textContent=profile.admission_status==='rejected'?'申请暂未通过':'等待加入';$('status').textContent='请在“我的账户”中提交加入申请或使用邀请码。加入前可继续本地体验和小练习。';}
@@ -74,6 +78,8 @@ $('clear').onclick = () => { resetChat(); $('status').textContent = '当前页�
 $('chat-nav').onclick = () => {showView('chat');$('message').focus();};
 $('community-nav').onclick=()=>{if(!community){$('status').textContent='社区功能正在加载，请稍后再试。';return;}showView('community');void community.showCommunity();};
 $('admin-nav').onclick=()=>{if(!community){$('status').textContent='管理功能正在加载，请稍后再试。';return;}showView('admin');void community.showAdmin();};
+$('personal-nav').onclick=()=>openPersonal();
+$('notifications-open').onclick=()=>openPersonal('notifications');
 $('choose-mood').onclick=()=>{$('checkin').scrollIntoView({block:'center'});$('checkin').focus({preventScroll:true});};
 document.querySelectorAll('[data-prompt]').forEach(b => b.onclick = () => {if (!pending) {$('message').value = b.dataset.prompt; $('message').focus();}});
 const moodSupport={
@@ -129,7 +135,7 @@ document.querySelectorAll('[data-close]').forEach(b => b.onclick=() => b.closest
 for (const id of ['about-open','harness-open']) $(id).onclick = () => openDialog('about-dialog');
 $('settings-open').onclick = () => openDialog('settings-dialog');
 $('mode-badge').outerHTML = '<button class="mode-badge" id="mode-badge" aria-label="打开账户">本地体验</button>';
-$('mode-badge').onclick=openAccount;$('account-open').onclick=openAccount;
+$('mode-badge').onclick=openAccount;$('account-open').onclick=()=>session()?.profile?openPersonal():openAccount();
 $('login-from-settings').onclick=()=>{$('settings-dialog').close();openAccount();};
 $('forget-legacy-key').onclick=()=>{try{localStorage.removeItem('quiet-harbor.encrypted-key.v1');$('privacy-status').textContent='已删除此设备旧版保存的加密 API Key。新版不会读取或上传它。';}catch{$('privacy-status').textContent='无法访问浏览器存储，请在浏览器设置中清除此网站数据。';}};
 window.addEventListener('pagehide',cancel);
@@ -144,6 +150,7 @@ welcome();
 try{
  backend=await initAuth({onChange:onAuthChange});
  community=initCommunity({api:(...args)=>backend.api(...args),onRequireAuth:openAccount,getSession:()=>backend.getSession(),onAccountRefresh:()=>backend.refresh()});
+ personal=initPersonal({api:(...args)=>backend.api(...args),getSession:()=>backend.getSession(),onRequireAuth:openAccount,onAccountSettings:openAccount,onEditPost:(post,after)=>community.compose(post,after),onOpenPost:(id,after)=>community.openPost(id,after),onAppealPost:(id,after)=>community.appealPost(id,after),onAppealComment:(id,after)=>community.appealComment(id,after),onDeleteComment:(id,after)=>community.deleteComment(id,after),onBlocks:()=>community.showBlocks(),onProfileRefresh:()=>backend.refresh(),onUnreadChange:setUnread});
  onAuthChange(backend.getSession());
  if(!backend.configured)$('status').textContent='本地体验 · 登录与社区尚未配置，当前不会发送聊天到网络。';
 }catch{$('status').textContent='账户服务暂时无法加载，本地练习仍可使用。';}

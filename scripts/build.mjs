@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 
 const target=resolve('dist');
 await mkdir(target,{recursive:true});
-const files=['index.html','community-rules.html','community-rules.css','style.css','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css'];
+const files=['index.html','community-rules.html','community-rules.css','style.css','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css','personal.js','personal.css'];
 for(const file of files)await copyFile(resolve('public',file),resolve(target,file));
 const config=JSON.parse(await readFile('public/site-config.json','utf8'));
 if(process.env.PUBLIC_SUPABASE_URL)config.supabaseUrl=process.env.PUBLIC_SUPABASE_URL;
@@ -27,9 +27,10 @@ await build({entryPoints:['public/auth-panel.js'],outfile:resolve(target,'auth-b
 const digest=content=>createHash('sha256').update(content).digest('hex').slice(0,16);
 const authVersion=digest(await readFile(resolve(target,'auth-bundle.js')));
 const communityVersion=digest(await readFile(resolve(target,'community.js')));
-const appSource=(await readFile(resolve(target,'app.js'),'utf8')).replace("'./auth-bundle.js'",`'./auth-bundle.js?v=${authVersion}'`).replace("'./community.js'",`'./community.js?v=${communityVersion}'`);
+const personalVersion=digest(await readFile(resolve(target,'personal.js')));
+const appSource=(await readFile(resolve(target,'app.js'),'utf8')).replace("'./auth-bundle.js'",`'./auth-bundle.js?v=${authVersion}'`).replace("'./community.js'",`'./community.js?v=${communityVersion}'`).replace("'./personal.js'",`'./personal.js?v=${personalVersion}'`);
 await writeFile(resolve(target,'app.js'),appSource);
 let page=(await readFile(resolve(target,'index.html'),'utf8')).replace('src="./app.js"',`src="./app.js?v=${digest(appSource)}"`);
-for(const css of ['style.css','community.css'])page=page.replace(`href="./${css}"`,`href="./${css}?v=${digest(await readFile(resolve(target,css)))}"`);
+for(const css of ['style.css','community.css','personal.css'])page=page.replace(`href="./${css}"`,`href="./${css}?v=${digest(await readFile(resolve(target,css)))}"`);
 await writeFile(resolve(target,'index.html'),page);
 console.log(config.supabaseUrl?'Built configured frontend in dist/':'Built frontend in dist/ (backend not configured; local preview only)');
