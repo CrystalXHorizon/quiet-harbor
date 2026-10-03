@@ -1,7 +1,27 @@
 project_id = "quiet-harbor"
 
 [auth]
-enable_signup = false
+enable_signup = true
+minimum_password_length = 12
+
+[auth.email]
+enable_confirmations = true
+
+[auth.email.template.invite]
+subject = "留岸 · 邀请你加入"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.confirmation]
+subject = "留岸 · 确认你的邮箱"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "留岸 · 找回密码"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.magic_link]
+subject = "留岸 · 确认登录"
+content_path = "./supabase/templates/magic-link.html"
 
 [functions.api]
 # api validates the JWT against Supabase Auth for every request itself.

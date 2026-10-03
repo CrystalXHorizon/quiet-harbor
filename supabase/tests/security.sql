@@ -1,4 +1,4 @@
--- Run after migrations on a disposable/local Supabase database: psql ... -f this-file.
+-- Automatically executed by test/backend-db.test.mjs using real PostgreSQL (PGlite).
 -- All fixtures and changes are rolled back. Test identities must not be real users.
 begin;
 insert into auth.users(id,email,raw_user_meta_data) values
@@ -17,9 +17,9 @@ begin
  update public.qh_profiles set role='owner' where id=a;
  update public.qh_profiles set role='moderator' where id=m;
  -- Empty dashboards still execute every query branch and must return valid data.
- r:=public.qh_action(a,'admin.queue');
+ r:=public.qh_action(a,'admin.queue','{}',true);
  if r <> '{"posts":[],"comments":[],"reports":[],"appeals":[]}'::jsonb then raise exception 'unexpected empty queue'; end if;
- r:=public.qh_action(a,'admin.usage');
+ r:=public.qh_action(a,'admin.usage','{}',true);
  if (r->>'total')::integer<>0 or r->'users'<>'[]'::jsonb then raise exception 'unexpected empty usage'; end if;
  if has_table_privilege('authenticated','public.qh_ai_settings','select') then raise exception 'ciphertext table readable by browser'; end if;
  if has_table_privilege('anon','public.qh_posts','select') then raise exception 'anonymous table access'; end if;
@@ -59,7 +59,7 @@ begin
 
  r:=public.qh_action(o,'comments.save',jsonb_build_object('post_id',p,'body','Unreviewed comment'));comment_id:=(r->>'id')::uuid;
  perform public.qh_action(o,'reports.create',jsonb_build_object('post_id',p,'reason','review post'));
- r:=public.qh_action(m,'admin.queue');
+ r:=public.qh_action(m,'admin.queue','{}',true);
  if jsonb_array_length(r->'comments')<>1 or jsonb_array_length(r->'reports')<>1 or jsonb_array_length(r->'appeals')<>1 then raise exception 'populated moderation queue incomplete'; end if;
  if r->'reports'->0->>'target_body'<>'Approved body' or r->'appeals'->0->>'target_title'<>'Revision' or r->'appeals'->0->>'target_body'<>'UNREVIEWED' then raise exception 'queue joined wrong record'; end if;
  if r::text like '%PRIVATE DRAFT%' then raise exception 'queue exposes draft'; end if;
@@ -85,7 +85,7 @@ begin
 
  perform public.qh_action(a,'admin.ai.save','{"config":{"model":"test","base":"https://api.deepseek.com","provider":"deepseek","protocol":"openai"},"encrypted_key":{"v":1,"iv":"opaque","data":"SECRET_CIPHERTEXT"},"key_last4":"1234","enabled":true,"user_daily_limit":1,"global_daily_limit":2}',true);
  r:=public.qh_action(b,'me');if r::text like '%SECRET%' or r::text like '%base%' or r::text like '%key_last4%' then raise exception 'config leaked through me';end if;
- r:=public.qh_action(a,'admin.ai.get');if r::text like '%SECRET%' or r::text like '%encrypted_key%' then raise exception 'ciphertext returned to admin';end if;
+ r:=public.qh_action(a,'admin.ai.get','{}',true);if r::text like '%SECRET%' or r::text like '%encrypted_key%' then raise exception 'ciphertext returned to admin';end if;
  perform public.qh_reserve_ai(b);
  failed:=false;begin perform public.qh_reserve_ai(b);exception when others then failed:=sqlerrm='quota_exceeded';end;
  if not failed then raise exception 'user quota bypass';end if;
@@ -93,7 +93,7 @@ begin
  failed:=false;begin perform public.qh_reserve_ai(a);exception when others then failed:=sqlerrm='quota_exceeded';end;
  if not failed then raise exception 'global quota bypass';end if;
  if (select sum(used) from public.qh_usage)<>2 then raise exception 'failed quota reservation changed usage';end if;
- r:=public.qh_action(a,'admin.usage');
+ r:=public.qh_action(a,'admin.usage','{}',true);
  if (r->>'total')::integer<>2 or jsonb_array_length(r->'users')<>2 then raise exception 'usage totals wrong'; end if;
  if not exists(select 1 from jsonb_array_elements(r->'users') x where x->>'nickname'='member' and (x->>'used')::integer=1) then raise exception 'usage member join wrong'; end if;
  if not exists(select 1 from public.qh_audit where action='ai.save') then raise exception 'audit absent';end if;
@@ -104,7 +104,7 @@ end $$;
 do $$ declare a uuid:='11111111-1111-4111-8111-111111111111';m uuid:='33333333-3333-4333-8333-333333333333';
  r jsonb;pid uuid;jid uuid;newjid uuid;cid uuid;fields jsonb:='{"title":"Owner post","body":"Version one","category":"share","preference":"listen","submit":true}';denied boolean;
 begin
- update public.qh_ai_settings set global_daily_limit=100;
+ update public.qh_ai_settings set global_daily_limit=100,user_daily_limit=100;
  r:=public.qh_action(a,'posts.save',fields);pid:=(r->>'id')::uuid;jid:=(r->>'moderation_job_id')::uuid;
  if jid is null or (select status from public.qh_posts where id=pid)<>'pending' then raise exception 'owner bypassed AI review';end if;
  perform public.qh_claim_moderation(a,jid);
@@ -152,7 +152,7 @@ begin
  r:=public.qh_action(b,'posts.save',fields);pid:=(r->>'id')::uuid;
  perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','post','id',pid,'decision','reject','reason','需复核'),true);
  r:=public.qh_action(b,'appeals.create',jsonb_build_object('post_id',pid,'reason','请求人工复核'));aid:=(r->>'id')::uuid;
- r:=public.qh_action(a,'admin.queue');
+ r:=public.qh_action(a,'admin.queue','{}',true);
  if not exists(select 1 from jsonb_array_elements(r->'appeals') e where e->>'id'=aid::text and e->>'target_body'='Original appeal content' and (e->>'can_restore')::boolean) then raise exception 'appeal queue missing original content';end if;
  denied:=false;begin perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','appeal','id',aid,'decision','restore','reason','恢复'),false);exception when others then denied:=sqlerrm='mfa_required';end;
  if not denied or (select status from public.qh_appeals where id=aid)<>'open' or (select status from public.qh_posts where id=pid)<>'rejected' then raise exception 'restore bypassed MFA';end if;
@@ -176,6 +176,130 @@ begin
  denied:=false;begin perform public.qh_action(m,'admin.moderate',jsonb_build_object('kind','report','id',reportid,'decision','hide','reason','自己下架'),true);exception when others then denied:=sqlerrm='self_moderation';end;
  if not denied or (select status from public.qh_posts where id=pid)<>'published' or (select status from public.qh_reports where id=reportid)<>'open' then raise exception 'failed moderation partially resolved report';end if;
  if has_function_privilege('service_role','public.qh_action_before_resolution(uuid,text,jsonb,boolean)','execute') or has_function_privilege('authenticated','public.qh_review_snapshot(uuid,uuid)','execute') then raise exception 'private resolution function exposed';end if;
+end $$;
+
+-- Audit regressions: MFA reads, every browser table grant, erasure and shared quotas.
+do $$ declare a uuid:='11111111-1111-4111-8111-111111111111';m uuid:='33333333-3333-4333-8333-333333333333';
+ x uuid:='55555555-5555-4555-8555-555555555555';y uuid:='66666666-6666-4666-8666-666666666666';z uuid:='77777777-7777-4777-8777-777777777777';
+ p uuid;q uuid;j uuid;c uuid;r jsonb;denied boolean;tab record;role_name text;priv text;found_text boolean;action_name text;i integer;
+ fields jsonb:='{"title":"Erasure test","body":"ERASE-ME-UNIQUE-801","category":"share","preference":"listen","submit":true}';
+begin
+ -- Every browser table grant is checked, including newly added tables.
+ if to_regprocedure('public.rls_auto_enable()') is not null and
+  (has_function_privilege('anon','public.rls_auto_enable()','execute') or has_function_privilege('authenticated','public.rls_auto_enable()','execute')) then
+  raise exception 'administrative RLS event trigger is callable by browser roles';
+ end if;
+ for tab in select tablename from pg_tables where schemaname='public' and tablename like 'qh_%' loop
+  foreach role_name in array array['anon','authenticated'] loop
+   foreach priv in array array['SELECT','INSERT','UPDATE','DELETE'] loop
+    if has_table_privilege(role_name,format('public.%I',tab.tablename),priv) then raise exception 'browser table privilege: % % %',role_name,tab.tablename,priv;end if;
+   end loop;
+  end loop;
+ end loop;
+ foreach action_name in array array['admin.queue','admin.applications','admin.users','admin.audit','admin.ai.get','admin.usage','admin.invites.list'] loop
+  denied:=false;begin perform public.qh_action(a,action_name,'{}',false);exception when others then denied:=sqlerrm='mfa_required';end;
+  if not denied then raise exception 'read action bypassed MFA: %',action_name;end if;
+  denied:=false;begin perform public.qh_action(a,action_name,'{}',null);exception when others then denied:=sqlerrm='mfa_required';end;
+  if not denied then raise exception 'NULL assurance bypassed MFA: %',action_name;end if;
+ end loop;
+ denied:=false;begin perform public.qh_action(m,'admin.purge',jsonb_build_object('id',y,'reason','request'),true);exception when others then denied:=sqlerrm='forbidden';end;
+ if not denied then raise exception 'moderator can erase accounts';end if;
+ denied:=false;begin perform public.qh_action(a,'admin.purge',jsonb_build_object('id',y,'reason','request'),false);exception when others then denied:=sqlerrm='mfa_required';end;
+ if not denied then raise exception 'purge bypassed MFA';end if;
+
+end $$;
+
+do $$ declare a uuid:='11111111-1111-4111-8111-111111111111';x uuid:='55555555-5555-4555-8555-555555555555';y uuid:='66666666-6666-4666-8666-666666666666';z uuid:='77777777-7777-4777-8777-777777777777';
+ p uuid;q uuid;c uuid;j uuid;r jsonb;tab record;found_text boolean;denied boolean;
+ fields jsonb:='{"title":"Erasure test","body":"ERASE-ME-UNIQUE-801","category":"share","preference":"listen","submit":true}';
+begin
+ -- Dedicated disposable identities avoid modifying the earlier fixtures.
+ insert into auth.users(id,email) values(x,'erase-x@example.invalid'),(y,'erase-y@example.invalid'),(z,'purge-z@example.invalid') on conflict do nothing;
+ update public.qh_profiles set admission_status='approved' where id in (x,y,z);
+ update public.qh_ai_settings set user_daily_limit=100,global_daily_limit=1000;
+ r:=public.qh_action(y,'posts.save',fields||jsonb_build_object('body','Pending erasure marker'));q:=(r->>'id')::uuid;
+ perform public.qh_action(y,'posts.delete',jsonb_build_object('id',q));
+ if exists(select 1 from public.qh_moderation_jobs where target_id=q) then raise exception 'pending deletion left moderation job';end if;
+ r:=public.qh_action(x,'posts.save',fields);p:=(r->>'id')::uuid;
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','post','id',p,'decision','approve','reason','approved'),true);
+ r:=public.qh_action(y,'comments.save',jsonb_build_object('post_id',p,'body','PENDING-COMMENT-ERASURE-804'));c:=(r->>'id')::uuid;
+ perform public.qh_action(y,'comments.delete',jsonb_build_object('id',c));
+ for tab in select tablename from pg_tables where schemaname='public' and tablename like 'qh_%' loop
+  execute format('select exists(select 1 from public.%I t where position($1 in to_jsonb(t)::text)>0)',tab.tablename) into found_text using 'PENDING-COMMENT-ERASURE-804';
+  if found_text then raise exception 'pending comment persists in %',tab.tablename;end if;
+ end loop;
+ r:=public.qh_action(y,'comments.save',jsonb_build_object('post_id',p,'body','ERASE-ME-UNIQUE-802'));c:=(r->>'id')::uuid;
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','comment','id',c,'decision','reject','reason','review'),true);
+ perform public.qh_action(y,'appeals.create',jsonb_build_object('comment_id',c,'reason','review'));
+ insert into public.qh_audit(action,target_id,reason) values('review.fixture',c,'ERASE-ME-UNIQUE-802');
+ denied:=false;begin perform public.qh_action(x,'comments.delete',jsonb_build_object('id',c));exception when others then denied:=sqlerrm='not_found';end;
+ if not denied then raise exception 'another author deleted comment';end if;
+ perform public.qh_action(y,'comments.delete',jsonb_build_object('id',c));
+ for tab in select tablename from pg_tables where schemaname='public' and tablename like 'qh_%' loop
+  execute format('select exists(select 1 from public.%I t where position($1 in to_jsonb(t)::text)>0)',tab.tablename) into found_text using 'ERASE-ME-UNIQUE-802';
+  if found_text then raise exception 'deleted comment persists in %',tab.tablename;end if;
+ end loop;
+ perform public.qh_action(y,'reports.create',jsonb_build_object('post_id',p,'reason','review'));
+ perform public.qh_action(x,'posts.save',fields||jsonb_build_object('id',p,'body','ERASE-ME-UNIQUE-803'));
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','post','id',p,'decision','reject','reason','review'),true);
+ perform public.qh_action(x,'appeals.create',jsonb_build_object('post_id',p,'reason','review'));
+ insert into public.qh_audit(action,target_id,reason) values('review.fixture',p,'ERASE-ME-UNIQUE-803');
+ r:=public.qh_action(y,'posts.save',fields||jsonb_build_object('body','Unrelated content'));q:=(r->>'id')::uuid;
+ insert into public.qh_moderation_jobs(author_id,kind,target_id,content,context) values(y,'post',q,'{}','{"post":{"body":"ERASE-ME-UNIQUE-801"}}');
+ perform public.qh_action(x,'posts.delete',jsonb_build_object('id',p));
+ for tab in select tablename from pg_tables where schemaname='public' and tablename like 'qh_%' loop
+  execute format('select exists(select 1 from public.%I t where to_jsonb(t)::text like $1)',tab.tablename) into found_text using '%ERASE-ME-UNIQUE-%';
+  if found_text then raise exception 'deleted post persists in %',tab.tablename;end if;
+ end loop;
+ -- The full author history must allow actual Auth deletion, including attribution.
+ r:=public.qh_action(x,'posts.save',fields||jsonb_build_object('body','Account erasure text'));p:=(r->>'id')::uuid;
+ insert into public.qh_invites(code_hash,code_hint,label,max_uses,created_by) values(repeat('f',64),'FFFF','author fixture',1,x);
+ delete from auth.users where id=x;
+ if exists(select 1 from public.qh_profiles where id=x) or exists(select 1 from public.qh_posts where author_id=x) or exists(select 1 from public.qh_moderation_jobs where author_id=x) then raise exception 'Auth deletion left owned data';end if;
+ if not exists(select 1 from public.qh_invites where code_hint='FFFF' and created_by is null) then raise exception 'attribution should be nullable';end if;
+ perform public.qh_action(a,'admin.purge',jsonb_build_object('id',z,'reason','confirmed request'),true);
+ if exists(select 1 from auth.users where id=z) then raise exception 'admin purge failed';end if;
+
+ -- The last allowed shared reservation blocks chat AND moderation afterward.
+ r:=public.qh_action(y,'posts.save',fields||jsonb_build_object('body','Shared quota'));j:=(r->>'moderation_job_id')::uuid;
+ update public.qh_ai_settings set user_daily_limit=1,global_daily_limit=1000;
+ perform public.qh_reserve_ai(y);
+ denied:=false;begin perform public.qh_claim_moderation(y,j);exception when others then denied:=sqlerrm='quota_exceeded';end;
+ if not denied then raise exception 'moderation bypassed shared user quota';end if;
+ denied:=false;begin perform public.qh_reserve_ai(y);exception when others then denied:=sqlerrm='quota_exceeded';end;
+ if not denied then raise exception 'chat bypassed shared user quota';end if;
+ update public.qh_ai_settings set user_daily_limit=100,global_daily_limit=(select used from public.qh_global_usage where day=(now() at time zone 'UTC')::date);
+ denied:=false;begin perform public.qh_claim_moderation(y,j);exception when others then denied:=sqlerrm='quota_exceeded';end;
+ if not denied then raise exception 'moderation bypassed shared global quota';end if;
+ denied:=false;begin perform public.qh_reserve_ai(a);exception when others then denied:=sqlerrm='quota_exceeded';end;
+ if not denied then raise exception 'chat bypassed shared global quota';end if;
+ update public.qh_ai_settings set global_daily_limit=1000;
+ perform public.qh_claim_moderation(y,j);
+ perform public.qh_complete_moderation(y,j,'approve','approved','[]','test','test');
+ if exists(select 1 from public.qh_audit where target_id=(select target_id from public.qh_moderation_jobs where id=j) and action='moderation.ai.approve' and actor_id is not null) then raise exception 'AI actor is not system';end if;
+ update public.qh_moderation_jobs set created_at=now()-interval '31 days' where id=j;
+ update public.qh_maintenance set last_run='-infinity';perform public.qh_cleanup();
+ if exists(select 1 from public.qh_moderation_jobs where id=j and (content<>'{}' or context<>'{}')) then raise exception 'snapshot retention failed';end if;
+end $$;
+
+do $$ declare a uuid:='11111111-1111-4111-8111-111111111111';r jsonb;s jsonb;i integer;denied boolean;begin
+ -- Pagination reaches older records and uses a non-overlapping 20-item window.
+ for i in 1..45 loop
+  insert into auth.users(id,email) values(gen_random_uuid(),'pagination@example.invalid');
+  insert into public.qh_audit(action) values('pagination');
+ end loop;
+ r:=public.qh_action(a,'admin.users','{"page":0}',true);s:=public.qh_action(a,'admin.users','{"page":1}',true);
+ if jsonb_array_length(r->'users')<>20 or not(r->>'hasMore')::boolean or jsonb_array_length(s->'users')<>20 then raise exception 'user pagination failed';end if;
+ if exists(select 1 from jsonb_array_elements(r->'users') x join jsonb_array_elements(s->'users') y on x->>'id'=y->>'id') then raise exception 'user pages overlap';end if;
+ r:=public.qh_action(a,'admin.audit','{"page":0}',true);s:=public.qh_action(a,'admin.audit','{"page":1}',true);
+ if jsonb_array_length(r->'events')<>20 or not(r->>'hasMore')::boolean then raise exception 'audit pagination failed';end if;
+ if exists(select 1 from jsonb_array_elements(r->'events') x join jsonb_array_elements(s->'events') y on x->>'id'=y->>'id') then raise exception 'audit pages overlap';end if;
+ -- A nearly elapsed old window does not reset the full burst budget.
+ delete from public.qh_rate_limits where user_id=a and bucket='test-bucket';
+ perform public.qh_rate(a,'test-bucket',2,60);perform public.qh_rate(a,'test-bucket',2,60);
+ update public.qh_rate_limits set window_start=now()-interval '1 second' where user_id=a and bucket='test-bucket';
+ denied:=false;begin perform public.qh_rate(a,'test-bucket',2,60);exception when others then denied:=sqlerrm='rate_limit';end;
+ if not denied then raise exception 'rate boundary resets token bucket';end if;
 end $$;
 
 set local role authenticated;

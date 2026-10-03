@@ -1,9 +1,15 @@
 import {runHarness,validateMessages,verifyKey} from './harness.js';
+import {BUILD_INFO} from './build-info.js';
 import {providerEnv} from './providers.js';
 import {resolveSupabaseKeys} from './supabase-keys.js';
 import {runModeration,POLICY_VERSION} from './moderation.js';
 import {generateInviteCode,hashInviteCode} from './security.js';
 import {ApiError,errorResponse,rpcError,allowedOrigins,safeProviderConfig,validateKey,encryptKey,decryptKey,readJson,verifiedAal2,validateAction} from './security.js';
+
+export function moderationConnection(job, allowedHosts) {
+ if(!job || !['post','comment'].includes(job.kind) || !job.content || typeof job.content.body!=='string' || !job.context || !job.encrypted_key)throw new ApiError('internal',503);
+ return safeProviderConfig(job.config,allowedHosts);
+}
 
 export function createApiHandler({env,fetchImpl=fetch}) {
  const origins=allowedOrigins(env.ALLOWED_ORIGINS);
@@ -31,6 +37,10 @@ export function createApiHandler({env,fetchImpl=fetch}) {
   try{
    if(!origin||!origins.has(origin))throw new ApiError('origin_forbidden',403);
    if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
+   if(request.method==='GET'&&new URL(request.url).pathname.endsWith('/health')){
+    const database=await internalFetch('/rest/v1/rpc/qh_backend_version',{});
+    return new Response(JSON.stringify({ok:true,...BUILD_INFO,...database}),{status:200,headers});
+   }
    if(request.method!=='POST')throw new ApiError('validation',405);
    const match=request.headers.get('authorization')?.match(/^Bearer ([A-Za-z0-9._-]+)$/);
    if(!match||match[1].length>16000)throw new ApiError('unauthorized',401);
@@ -46,6 +56,19 @@ export function createApiHandler({env,fetchImpl=fetch}) {
    if(Array.isArray(user.factors)&&user.factors.some(f=>f.factor_type==='totp'&&f.status==='verified')&&!aal2)throw new ApiError('mfa_required',403);
    const input=await readJson(request);const payload=validateAction(input);
    const rpc=(action,payload={})=>internalFetch('/rest/v1/rpc/qh_action',{actor:user.id,action,payload,aal2});
+   let billingError=null;
+   function chargedFetch(kind,firstReserved=true) {
+    let first=true;
+    return async (url,options)=>{
+     options.signal?.throwIfAborted();
+     try{if(!first || !firstReserved)await internalFetch('/rest/v1/rpc/qh_reserve_model',{actor:user.id,kind});}catch(error){billingError=error;throw error;}
+     options.signal?.throwIfAborted();
+     try{await internalFetch('/rest/v1/rpc/qh_record_ai_call',{actor:user.id,kind,start_turn:first&&kind==='chat'});}catch(error){billingError=error;throw error;}
+     options.signal?.throwIfAborted();
+     first=false;
+     return fetchImpl(url,options);
+    };
+   }
    let result;
    if(input.action==='chat'){
     let messages;try{messages=validateMessages(payload.messages);}catch{throw new ApiError('validation');}
@@ -55,7 +78,8 @@ export function createApiHandler({env,fetchImpl=fetch}) {
     const reserved=await internalFetch('/rest/v1/rpc/qh_reserve_ai',{actor:user.id});
     const config=safeProviderConfig(reserved.config,env.AI_ALLOWED_HOSTS);
     const key=await decryptKey(reserved.encrypted_key,env.AI_ENCRYPTION_KEY,config);
-    try{result=await runHarness(messages,providerEnv(config,key),{fetchImpl,signal:request.signal,reportErrors:true});}catch{throw new ApiError('provider_failed',502);}
+    try{result=await runHarness(messages,providerEnv(config,key),{fetchImpl:chargedFetch('chat'),signal:request.signal,reportErrors:true});}catch(error){if(billingError)throw billingError;if(error instanceof ApiError)throw error;throw new ApiError('provider_failed',502);}
+    if(billingError&&result.route==='paused')throw billingError;
    }else if(input.action==='admin.ai.save'||input.action==='admin.ai.test'){
     // Permission must be checked before reading stored ciphertext or using a supplied key.
     await rpc('admin.ai.get');
@@ -70,7 +94,7 @@ export function createApiHandler({env,fetchImpl=fetch}) {
     if(input.action==='admin.ai.test'){
      if(!key)throw new ApiError('key_required');
      await rpc('admin.ai.test');
-     try{await verifyKey(key,{env:providerEnv(config,key),fetchImpl,signal:request.signal});}catch{throw new ApiError('provider_failed',502);}
+     try{await verifyKey(key,{env:providerEnv(config,key),fetchImpl:chargedFetch('test',false),signal:request.signal});}catch(error){if(billingError)throw billingError;if(error instanceof ApiError)throw error;throw new ApiError('provider_failed',502);}
      result={ok:true};
     }else{
      if(payload.enabled&&!key)throw new ApiError('key_required');
@@ -94,10 +118,10 @@ export function createApiHandler({env,fetchImpl=fetch}) {
     let model='';
     try{
      const job=await internalFetch('/rest/v1/rpc/qh_claim_moderation',{actor:user.id,job_id});
-     const config=safeProviderConfig(job.config,env.AI_ALLOWED_HOSTS);
+     const config=moderationConnection(job,env.AI_ALLOWED_HOSTS);
      const key=await decryptKey(job.encrypted_key,env.AI_ENCRYPTION_KEY,config);
-     model=job.moderation_model||config.model;
-     outcome=await runModeration(job,{...providerEnv(config,key),AI_MODEL:model},{fetchImpl,signal:request.signal});
+     model=config.model;
+     outcome=await runModeration(job,providerEnv(config,key),{fetchImpl:chargedFetch('moderation'),signal:request.signal});
     }catch{/* A saved submission must never become published when moderation fails. */}
     try{
      const completed=await internalFetch('/rest/v1/rpc/qh_complete_moderation',{actor:user.id,job_id,...outcome,model});

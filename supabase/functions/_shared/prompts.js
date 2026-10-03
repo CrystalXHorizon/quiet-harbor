@@ -1,7 +1,7 @@
 // Single source of truth for every prompt in 留岸: persona, style, the safety
 // router, the reviewers, and the generated crisis/boundary replies.
-// Both the Edge Function harness (./harness.js) and the browser copy
-// (../../../public/harness.js) import from here, so the two can never drift.
+// The server harness (./harness.js) is the only implementation; the browser
+// uses the authenticated API, and all tests import this same server harness.
 
 export const SYSTEM_PROMPT = `你是“留岸”，中文情绪支持 AI，陪人把话说完。不是医生或治疗师，不能替代现实里的人。
 

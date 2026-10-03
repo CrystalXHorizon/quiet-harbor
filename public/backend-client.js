@@ -1,7 +1,8 @@
 // Browser authentication and the single authenticated application API.
 // No provider credentials, chat history, or administrator secrets are persisted here.
 export function validateSiteConfig(value) {
-  if (!value || typeof value !== 'object' || !value.supabaseUrl || !value.supabaseAnonKey) return null;
+  if (!value || typeof value !== 'object' || (!value.supabaseUrl && !value.supabaseAnonKey)) return null;
+  if (!value.supabaseUrl || !value.supabaseAnonKey) throw new Error('站点登录地址和公开密钥必须同时配置，请联系站长。');
   let url;
   try { url = new URL(value.supabaseUrl); } catch { throw new Error('站点登录地址配置不正确，请联系站长。'); }
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
@@ -18,7 +19,7 @@ export function validateSiteConfig(value) {
   } else if (!key.startsWith('sb_publishable_')) {
     throw new Error('站点只能使用公开的 Supabase publishable 或 anon 密钥。');
   }
-  return { supabaseUrl: url.origin, supabaseAnonKey: key, inviteOnly: value.inviteOnly !== false };
+  return { supabaseUrl: url.origin, supabaseAnonKey: key };
 }
 
 export async function loadSiteConfig(fetchImpl = fetch, url = new URL('./site-config.json', import.meta.url)) {
@@ -31,7 +32,8 @@ function abortError() { return new DOMException('账户已变更，请重试。'
 function safeUser(user) { return user ? { id: user.id, email: user.email || '' } : null; }
 function apiError(body, status) {
   const fallbacks = { 400: '请求内容不正确，请检查后重试。', 401: '登录已过期，请重新登录。', 403: '当前账户没有此操作权限。', 404: '内容不存在或已不可用。', 429: '操作较频繁或已达到用量上限，请稍后再试。', 503: '服务尚未配置完成，请稍后再试。' };
-  const message = typeof body?.error === 'string' && body.error.length <= 350 ? body.error : (fallbacks[status] || '服务暂时不可用，请稍后重试。');
+  const messages = { mfa_required:'请先完成二次验证。', admission_required:'账户尚未通过加入审核。', quota_exceeded:'今日 AI 调用额度已用完，请明天再试。', rate_limit:'操作较频繁，请稍后再试。', not_configured:'AI 服务尚未启用，请联系站长。', provider_failed:'AI 服务暂时无法完成请求，请稍后再试。', muted:'账户当前处于禁言状态。', invite_invalid:'邀请码无效、已停用、过期或已用完。', content_changed:'内容已更新，请刷新后重试。', self_moderation:'请由另一位管理员审核你发布的内容。', duplicate:'已经提交过，请等待处理。', key_required:'更换供应商地址或协议时，请重新填写 API Key。' };
+  const message = messages[body?.code] || fallbacks[status] || '服务暂时不可用，请稍后重试。';
   const error = new Error(message);
   error.isBackendError = true;
   error.code = typeof body?.code === 'string' ? body.code.slice(0, 60) : 'request_failed';
@@ -39,11 +41,11 @@ function apiError(body, status) {
   return error;
 }
 
-export function createBackendClient(config, { createClient, fetchImpl = fetch, onChange = () => {}, onAuthEvent = () => {}, flowType = 'pkce' } = {}) {
+export function createBackendClient(config, { createClient, fetchImpl = fetch, onChange = () => {}, onAuthEvent = () => {}, detectSessionInUrl = true } = {}) {
   let authSession = null, session = null, epoch = 0, refreshVersion = 0, disposed = false, signedOut = false;
   const pending = new Set();
   const client = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType }
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl, flowType: 'pkce' }
   });
   function notify() { if (!disposed) onChange(session); }
   function adopt(next) {
@@ -82,7 +84,7 @@ export function createBackendClient(config, { createClient, fetchImpl = fetch, o
     const onAbort = () => controller.abort();
     if (signal?.aborted) throw abortError();
     signal?.addEventListener('abort', onAbort, { once: true });
-    const timeout = setTimeout(onAbort, 100000);
+    const timeout = setTimeout(onAbort, 250000);
     pending.add(controller);
     try {
       const response = await fetchImpl(`${config.supabaseUrl}/functions/v1/api`, {
@@ -98,7 +100,7 @@ export function createBackendClient(config, { createClient, fetchImpl = fetch, o
       try { body = JSON.parse(text); } catch { throw new Error('服务未能返回有效结果，请稍后重试。'); }
       if (!response.ok || body?.error) {
         const problem = apiError(body, response.status);
-        if (response.status === 401) { await signOut().catch(() => {}); }
+        if (response.status === 401) { await signOut().catch(() => {}); onAuthEvent('SESSION_EXPIRED'); }
         if (problem.code === 'mfa_required') {
           // Password sign-in can yield an AAL1 session for an enrolled account.
           // Retain only the identity needed to complete MFA; discard prior app data.

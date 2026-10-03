@@ -1,7 +1,7 @@
 name: Check and publish frontend
 on:
   push:
-    branches: [main, feature/community-backend]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -21,11 +21,16 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check supabase/functions/api/index.ts
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: npm run build
         env:
           PUBLIC_SUPABASE_URL: ${{ vars.PUBLIC_SUPABASE_URL }}
           PUBLIC_SUPABASE_ANON_KEY: ${{ vars.PUBLIC_SUPABASE_ANON_KEY }}
-          PUBLIC_INVITE_ONLY: ${{ vars.PUBLIC_INVITE_ONLY }}
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-preview
@@ -45,5 +50,14 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require backend deployed from the same commit
+        env:
+          PUBLIC_SUPABASE_URL: ${{ vars.PUBLIC_SUPABASE_URL }}
+          PUBLIC_SITE_ORIGIN: ${{ vars.PUBLIC_SITE_ORIGIN }}
+        run: node scripts/backend-health.mjs
       - uses: actions/deploy-pages@v4
         id: deployment

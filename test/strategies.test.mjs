@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {strategyMessages,strategies} from '../public/strategies.js';
-import {validateMessages,runHarness} from '../public/harness.js';
+import {validateMessages,runHarness} from '../supabase/functions/_shared/harness.js';
 test('strategy request carries real context and bounds it without mutating chat',()=>{
  const history=[{role:'user',content:'明天面试，不想做身体练习。'},{role:'assistant',content:'先不做。'}];
  const original=JSON.stringify(history);const messages=validateMessages(strategyMessages(history));

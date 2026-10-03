@@ -6,21 +6,22 @@
   "type": "module",
   "description": "A personal, privacy-conscious Chinese AI support space with a bounded safety harness.",
   "engines": {
-    "node": ">=24"
+    "node": "24.x"
   },
   "scripts": {
     "start": "npm run build && node scripts/preview.mjs",
     "test": "node --test",
     "check": "node scripts/check.mjs",
     "build": "node scripts/build.mjs",
-    "build:rds": "node scripts/build-rds.mjs",
-    "preview": "node scripts/preview.mjs"
+    "preview": "node scripts/preview.mjs",
+    "test:browser": "node scripts/browser-run.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "playwright": "1.58.2"
   }
 }

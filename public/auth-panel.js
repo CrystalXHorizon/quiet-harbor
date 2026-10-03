@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { createBackendClient, loadSiteConfig } from './backend-client.js';
 import { authNavigation, authLandingUrl } from './auth-navigation.js';
+import {chineseValidation} from './form-validation.js';
 
 const roleNames = { member: '普通成员', moderator: '社区管理员', owner: '站长' };
 function element(tag, text, className) {
@@ -18,7 +19,7 @@ function input(form, labelText, name, { type = 'text', autocomplete = 'off', val
   node.id = `auth-${name}`; label.htmlFor = node.id;
   if (minLength) node.minLength = minLength;
   if (maxLength) node.maxLength = maxLength;
-  form.append(label, node); return node;
+  chineseValidation(node); form.append(label, node); return node;
 }
 function landingUrl(action) { return authLandingUrl(location.href, action); }
 function authError(error) {
@@ -40,10 +41,12 @@ export async function initAuth({ onChange = () => {} } = {}) {
   if (!dialog) throw new Error('缺少账户对话框。');
   let config = null, backend = null, mode = 'login', pending = false, viewId = 0, enrolled = null;
   const navigation = authNavigation(location.href);
-  let startupError = '', recovery = navigation.recovery, factorId = null;
+  let startupError = '', recovery = navigation.recovery, factorId = null, sessionExpired = false;
   if (navigation.reset) mode = 'reset';
   let invitation = navigation.invitation;
-  const implicitCallback = navigation.implicit;
+  let emailLink = navigation.emailLink;
+  // Remove token fragments before constructing Auth. The SDK must never consume them.
+  if (navigation.rejected || emailLink) history.replaceState(null, '', landingUrl());
   let content, status;
   function open() { render(); if (!dialog.open) dialog.showModal(); }
   function message(text) { status.textContent = text; }
@@ -85,6 +88,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     const title = element('h2', '我的账户'); title.id = 'auth-title'; dialog.setAttribute('aria-labelledby', title.id);
     content = element('div', undefined, 'auth-content');
     status = element('p', '', 'auth-status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    if(sessionExpired)status.textContent='登录已过期，请重新登录后继续。';
     dialog.replaceChildren(close, element('span', '留岸 · 账户', 'overline'), title, content, status);
     if (!config || !backend) {
       content.append(element('p', startupError || '登录和社区尚未上线。站长配置后端后，你就可以在这里登录。'), element('p', '目前可以继续使用本地陪伴体验与小练习；这里不会创建演示账户。'));
@@ -92,7 +96,12 @@ export async function initAuth({ onChange = () => {} } = {}) {
     }
     const session = backend.getSession();
     if (session?.mfaRequired) { title.textContent = '完成二次验证'; renderAccount(session); return; }
-    if ((recovery || invitation) && session?.user) { title.textContent = '设置新密码'; renderPassword(); return; }
+    if (emailLink) {
+      title.textContent = '确认邮件链接';
+      content.append(element('p', '只有你刚刚申请了这封邮件，且确认它来自留岸时，才继续。继续后会切换到邮件对应的账户。'), button('确认使用邮件链接', () => run(() => backend.client.auth.verifyOtp({ token_hash: emailLink.tokenHash, type: emailLink.type }), async () => { recovery = emailLink.type === 'recovery'; emailLink = null; invitation = false; await backend.refresh(); render(); message('邮箱已验证。请确认这里显示的是你的邮箱。'); })), button('取消', () => { emailLink = null; recovery = false; invitation = false; render(); }));
+      return;
+    }
+    if (recovery && session?.user) { title.textContent = '设置新密码'; renderPassword(); return; }
     if (session?.user) { renderAccount(session); return; }
     if (mode === 'reset' || recovery || invitation) {
       mode = 'reset'; title.textContent = '找回密码';
@@ -144,7 +153,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     if (session.error) content.append(element('p', session.error));
     if (profile?.status === 'banned') content.append(element('p', '账户已被停用。如有疑问，请联系站长。'));
     if (profile?.status === 'muted') content.append(element('p', '账户当前处于禁言状态，暂时不能发布或回复。'));
-    if (session.usage) content.append(element('small', `今日 AI 用量：${Number(session.usage.used) || 0} / ${Number(session.usage.limit) || 0} 次。`));
+    if (session.usage) content.append(element('small', `今日 AI 调用预留：${Number(session.usage.used) || 0} / ${Number(session.usage.limit) || 0} 次。`));
     if (profile && profile.admission_status !== 'approved' && profile.status !== 'banned') renderAdmission(session);
     if (profile?.admission_status === 'approved') {
       const form = element('form', undefined, 'auth-form');
@@ -153,7 +162,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
       content.append(form);
     }
     const security = element('section', undefined, 'auth-mfa');
-    security.append(element('h3', '账户安全'), element('p', '已设置验证器的账户，每次登录后都需要完成第二步验证。站长和管理员修改设置或处理社区内容前，也需要完成验证。'));
+    security.append(element('h3', '账户安全'), element('p', '已设置验证器的账户，每次登录后都需要完成第二步验证。站长和管理员读取管理数据、修改设置或处理社区内容前，都需要完成验证。'));
     security.append(button(session.mfaRequired ? '继续二次验证' : '设置或验证二次验证', () => { void showMfa(security); }));
     content.append(security);
     const actions = element('div', undefined, 'dialog-actions');
@@ -170,7 +179,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     const form = element('form', undefined, 'auth-form');
     const label = element('label', '简单介绍你希望如何使用这里');
     const reason = element('textarea'); reason.id = 'auth-application-reason'; label.htmlFor = reason.id;
-    reason.required = true; reason.maxLength = 1000; reason.rows = 3; reason.value = application?.reason || '';
+    chineseValidation(reason); reason.required = true; reason.maxLength = 1000; reason.rows = 3; reason.value = application?.reason || '';
     form.append(label, reason, element('small', '不需要提供诊断、病历或其他私密经历。申请说明仅供站长和管理员审核。'));
     submit(form, application ? '更新并提交申请' : '提交加入申请', () => run(() => backend.api('admission.apply', { reason: reason.value.trim() }), async () => { await backend.refresh(); render(); message('申请已提交，请等待审核。可以使用“刷新账户状态”查看进展。'); }));
     const invite = element('form', undefined, 'auth-form');
@@ -246,7 +255,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
   };
   if (config) {
     backend = createBackendClient(config, {
-      createClient, flowType: implicitCallback ? 'implicit' : 'pkce',
+      createClient, detectSessionInUrl: !navigation.rejected && !navigation.emailLink,
       onChange: session => {
         onChange(session);
         // Do not replace a form while the user is typing or completing a request.
@@ -254,7 +263,9 @@ export async function initAuth({ onChange = () => {} } = {}) {
       },
       onAuthEvent: event => {
         if (event === 'PASSWORD_RECOVERY') { recovery = true; open(); }
-        if (event === 'SIGNED_IN' && invitation) { recovery = true; open(); }
+        if (event === 'SIGNED_IN' && invitation && !emailLink) { invitation = false; open(); }
+        if (event === 'SIGNED_IN') sessionExpired=false;
+        if (event === 'SESSION_EXPIRED') { sessionExpired=true; open(); message('登录已过期，请重新登录后继续。'); }
         if (event === 'MFA_REQUIRED') {
           // Repeated me requests or token refreshes must not erase a TOTP form.
           // The challenge uses Auth directly, so it works before profile access.
@@ -271,6 +282,6 @@ export async function initAuth({ onChange = () => {} } = {}) {
   } else { onChange(null); }
   render();
   if (navigation.open) open();
-  if ((startupError || navigation.callbackError) && config) { open(); message(startupError || '邮件链接已失效，请重新发送找回密码邮件，并打开最新的一封。'); }
+  if ((startupError || navigation.callbackError) && config) { open(); message(startupError || '邮件链接无效或使用了不受支持的登录片段，请重新获取邮件，并在发起请求的浏览器中打开。'); }
   return controller;
 }

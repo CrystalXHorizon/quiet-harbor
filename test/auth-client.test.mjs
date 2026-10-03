@@ -18,8 +18,10 @@ function fixture({ session = authSession, fetchImpl = async () => Response.json(
 
 test('site config permits only public credentials and secure project origins', async () => {
   assert.equal(validateSiteConfig({ supabaseUrl: '', supabaseAnonKey: '' }), null);
-  assert.equal(validateSiteConfig(config).inviteOnly, true);
-  assert.equal(validateSiteConfig({ ...config, inviteOnly: false }).inviteOnly, false);
+  assert.throws(()=>validateSiteConfig({supabaseUrl:config.supabaseUrl}),/同时配置/);
+  assert.throws(()=>validateSiteConfig({supabaseAnonKey:config.supabaseAnonKey}),/同时配置/);
+  assert.equal(validateSiteConfig(config).inviteOnly, undefined);
+  assert.equal(validateSiteConfig({ ...config, inviteOnly: false }).inviteOnly, undefined);
   for (const supabaseUrl of ['http://untrusted.example', 'https://u:p@example.test', 'https://example.test/path', 'https://example.test?token=1']) {
     assert.throws(() => validateSiteConfig({ ...config, supabaseUrl }));
   }
@@ -74,7 +76,7 @@ test('expired token clears account and MFA-required responses request a challeng
   await assert.rejects(expired.client.api('me'), /请重新登录/);
   assert.equal(expired.signOuts, 1); assert.equal(expired.client.getSession(), null); expired.client.dispose();
   const mfa = fixture({ fetchImpl: async () => Response.json({ error: '需要二次验证。', code: 'mfa_required' }, { status: 403 }) });
-  await assert.rejects(mfa.client.api('admin.ai.get'), /需要二次验证/);
+  await assert.rejects(mfa.client.api('admin.ai.get'), /二次验证/);
   assert.deepEqual(mfa.events, ['MFA_REQUIRED']); mfa.client.dispose();
 });
 

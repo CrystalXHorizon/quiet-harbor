@@ -1,6 +1,7 @@
 *
 !package.json
-!server.mjs
-!harness.mjs
+!package-lock.json
+!scripts/
+!scripts/**
 !public/
 !public/**

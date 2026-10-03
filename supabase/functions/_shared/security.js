@@ -85,7 +85,7 @@ export function validateAction(input) {
  const required={
   'profiles.get':['user_id'],'notifications.read':['id'],'bookmarks.remove':['post_id'],'posts.get':['id'],'posts.save':['title','body','category','preference','submit'],'posts.delete':['id'],'posts.comments':['id','open'],
   'comments.save':['post_id','body'],'comments.delete':['id'],'bookmarks.toggle':['post_id'],'blocks.toggle':['user_id'],'reports.create':['reason'],
-  'appeals.create':['reason'],'admin.moderate':['kind','id','decision','reason'],'admin.user':['id','reason'],
+  'appeals.create':['reason'],'admin.moderate':['kind','id','decision','reason'],'admin.user':['id','reason'],'admin.purge':['id','reason'],
   'admin.ai.save':['config','enabled','user_daily_limit','global_daily_limit'],'admin.ai.test':['config'],'chat':['messages']
  }[input.action]||[];
  if(required.some(key=>p[key]===undefined))throw new ApiError('validation');
@@ -115,4 +115,5 @@ export function validateAction(input) {
 }
 for(const action of ['admission.apply','admission.redeem','admin.applications','admin.application.review','admin.invites.list','admin.invites.create','admin.invites.update','personal.overview','personal.comments','personal.appeals','personal.bookmarks','notifications.list','notifications.read','notifications.read_all','profiles.get','bookmarks.remove'])ACTIONS.add(action);
 export function generateInviteCode(){return Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('');}
+ACTIONS.add('admin.purge');
 export async function hashInviteCode(code){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code.trim().toUpperCase()))),x=>x.toString(16).padStart(2,'0')).join('');}

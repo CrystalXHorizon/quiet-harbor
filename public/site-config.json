@@ -1,5 +1,4 @@
 {
   "supabaseUrl": "",
-  "supabaseAnonKey": "",
-  "inviteOnly": true
+  "supabaseAnonKey": ""
 }

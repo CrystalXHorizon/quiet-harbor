@@ -1,6 +1,6 @@
 # 留岸 2.0：Supabase 部署步骤
 
-使用阿里云 RDS Supabase 时，请先阅读 [RDS 部署步骤](DEPLOY-RDS.md)，使用单文件函数包和 SQL Editor 部署；本页的 CLI 项目关联步骤适用于 Supabase 托管项目。
+当前支持 Supabase 托管项目。历史 RDS 单文件打包路径已停用，见 [停用说明](DEPLOY-RDS.md)。
 
 此版本包含可部署的登录、社区、管理后台和服务端 AI。没有 Supabase 项目时，页面明确显示“尚未配置”，只能使用本地体验和练习；这不代表云端已经上线。
 
@@ -19,7 +19,7 @@ npm run preview
 打开终端显示的地址。`dist/` 是构建产物；不要直接发布含未打包模块的 `public/`。
 测试使用模拟服务和本地 PostgreSQL 引擎，不产生真实 AI 调用费用。
 
-可选的浏览器联调脚本是 `node scripts/browser-check.cjs`，运行前启动预览并在本机准备 Playwright 与 Chromium。脚本可通过 `PLAYWRIGHT_MODULE` 指向已安装的 Playwright 模块，通过 `PLAYWRIGHT_CHANNEL=msedge` 使用已安装的 Edge。它只在测试中拦截请求，不会创建真实用户或帖子；截图保存在 `test-results/browser/`。
+浏览器回归执行 `npx playwright install chromium` 和 `npm run test:browser`，脚本自动构建、启动和关闭预览，使用固定测试夹具。CI 会安装 Chromium 并运行相同检查。截图保存在 `test-results/browser/`。
 
 ## 2. 创建 Supabase 项目
 
@@ -31,7 +31,7 @@ Auth 配置：
 - Redirect URLs 添加正式网页地址和密码恢复地址 `https://crystalxhorizon.github.io/quiet-harbor/?account=recovery`；本地测试时另加 `http://127.0.0.1:4177/` 及 `http://127.0.0.1:4177/?account=recovery`。不要配置任意域名通配跳转。
 - 先应用全部数据库迁移、部署 API，再开启 Supabase Auth 的邮箱注册。新账户默认待审批：验证邮箱后提交申请，由站长或管理员审批；也可以兑换站长签发的有效邀请码免审批。邮箱验证仍然必需，邀请码不授予管理员权限。
 - 启用邮箱确认，配置发送验证、邀请、找回密码邮件的 SMTP。先测试实际收信及重置密码流程，再开放用户使用。
-- 启用 TOTP MFA。已绑定验证器的账户，密码登录后必须完成二次验证才能读取应用数据；审核、禁言、封禁、修改 AI 设置及角色等管理修改操作始终要求二次验证。
+- 启用 TOTP MFA。已绑定验证器的账户，密码登录后必须完成二次验证才能读取应用数据；所有管理读写接口都要求二次验证，包括队列、申请、用户、审计、AI 设置和用量。尚未绑定的管理员可先进入账户安全设置验证器。
 
 官方说明：[Auth](https://supabase.com/docs/guides/auth)、[SMTP](https://supabase.com/docs/guides/auth/auth-smtp)、[MFA](https://supabase.com/docs/guides/auth/auth-mfa)。
 
@@ -52,7 +52,7 @@ npx supabase db push
 
 ### 从旧版升级申请制
 
-已有数据库仅执行尚未应用的 `202610010002_admission.sql`，不要重新执行初始建表脚本。随后更新 Edge Function，再发布前端，最后允许 Auth 邮箱注册。`build:rds` 生成的合并 SQL 用于空数据库；升级时使用单独的迁移文件。
+已有数据库仅执行尚未应用的 `202610010002_admission.sql`，不要重新执行初始建表脚本。随后更新 Edge Function，再发布前端，最后允许 Auth 邮箱注册。升级使用新增的迁移文件，不执行历史完整初始化脚本。
 
 升级前已有账户保持已批准；新账户默认待审批。用户验证邮箱、登录后，在“我的账户”提交简短申请，或兑换邀请码。待审批账户不能读取社区或调用 AI。站长与管理员在后台审批，站长管理邀请码；管理修改操作需要二次验证。邀请码只免人工审批，不免邮箱验证，也不会解除封禁或授予管理角色。
 
@@ -78,7 +78,7 @@ npx supabase db push
 node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))"
 ```
 
-也可以把 `supabase/.env.example` 复制为被 Git 忽略的 `supabase/.env.local`，在本机填好以上值后执行 `npx supabase secrets set --env-file supabase/.env.local`。根目录的 `.env.example` 属于旧版服务器，新版不使用其中的 `APP_ACCESS_TOKEN` 或个人 AI Key 配置。
+也可以把 `supabase/.env.example` 复制为被 Git 忽略的 `supabase/.env.local`，在本机填好以上值后执行 `npx supabase secrets set --env-file supabase/.env.local`。旧版根目录服务器与个人 AI Key 配置已经移除。
 
 ```sh
 npx supabase functions deploy api
@@ -96,15 +96,14 @@ npx supabase functions deploy api
 
 - `PUBLIC_SUPABASE_URL`：项目的 HTTPS URL。
 - `PUBLIC_SUPABASE_ANON_KEY`：publishable key 或 anon key。不能填写 service_role / secret key / AI Key。
-- `PUBLIC_INVITE_ONLY`：旧版兼容配置；新版使用申请与邀请码流程，不再用此字段隐藏注册入口。实际准入由数据库检查。
 
 构建会拒绝 service_role JWT 和 `sb_secret_` 私钥。GitHub Actions 只在 `main` 且前两项配置齐全时发布；功能分支只检查代码并生成预览构建包。
 
-先在测试环境验证，再将 `feature/community-backend` 合并到 `main`。数据库和函数先就绪，最后切换前端；不要让正式前端先进入无法登录的状态。
+先在测试环境验证，再通过 `main` 部署后端和前端。Pages 发布会检查后端健康接口返回的提交与本次提交相同；先完成后端工作流，再重新运行 Pages 工作流。
 
 ## 6. 初始化站长
 
-确认第 5 步的新前端已可访问，再在 Auth 用户管理邀请自己的邮箱，完成邀请链接的账户设置。不要把邀请发往尚无新版登录功能的旧页面；已有过期邀请应重新发送。复制该账户的真实 User UID，在 Supabase SQL Editor 执行：
+确认第 5 步的新前端已可访问，再通过邮箱注册并验证自己的账户，或使用下述 token_hash 模板邀请自己的邮箱。邀请确认只完成邮箱验证和资料设置，密码通过“找回密码”流程设置。不要把邀请发往尚无新版登录功能的旧页面；已有过期邀请应重新发送。复制该账户的真实 User UID，在 Supabase SQL Editor 执行：
 
 ```sql
 update public.qh_profiles
@@ -120,7 +119,7 @@ where id = 'REPLACE_WITH_YOUR_ACTUAL_AUTH_USER_UUID';
 
 站长完成 MFA 后，进入管理后台 AI 设置，选择供应商、模型和接口地址，输入供应商 API Key，先测试再保存启用。保存后只显示已配置状态和末四位，不显示明文密钥。
 
-每个 AI 对话请求先原子扣除一轮额度，再运行 Harness（通常最多三次模型请求）。失败或取消也消耗本轮额度，避免重试绕过限制。每日额度按 UTC 重置；它是调用次数限制，不是服务商实际账单金额的精确上限。可在后台设置单用户和全站每日额度，紧急时关闭 AI。
+聊天、社区审核和连接测试共享配额，每次供应商请求前原子预留一次调用。Harness 每轮通常最多三次，逐次检查余额；额度不足时不发送下一次请求，未复核草稿不会展示，危机与边界仍有固定安全兜底。失败或取消也消耗已预留的调用额度。每日额度按 UTC 重置；它是调用次数限制，不是服务商实际账单金额的精确上限。可在后台设置单用户和全站每日额度，紧急时关闭 AI。
 
 ## 8. 上线验收
 
@@ -129,7 +128,7 @@ where id = 'REPLACE_WITH_YOUR_ACTUAL_AUTH_USER_UUID';
 - 修改已发布帖子后，访客仍看到旧的已审核版本，直到新版本通过。
 - 普通用户调用管理接口、伪造角色、直接读取数据库表或修改审核结果，都应失败。
 - 社区管理员不能读取 AI 密钥、修改站长或授予角色。禁言与封禁由后端执行。
-- 管理员未完成 MFA 时，审核、账户处置、AI 配置和角色变更等修改应失败。
+- 管理员未完成 MFA 时，所有管理读写接口都应失败。
 - 检查浏览器网络与响应：没有供应商 Key；聊天只发到本站后台；退出后未完成请求不能继续显示旧账户数据。
 - 测试邮箱邀请、确认、密码找回，以及验证器登录。测试真实模型时会使用供应商额度。
 - 备份数据库，明确帖子、举报、操作记录的保留策略；默认没有 AI 聊天内容表，模型供应商仍可能按其政策保留请求。
@@ -142,10 +141,34 @@ GitHub 的 MIT / CC BY-SA 授权只覆盖项目自身材料。用户帖子不自
 
 ## AI 审核升级
 
+审计整改新增 `202610030004_audit_remediation.sql`，在既有个人中心迁移之后执行。它统一管理读取 MFA、模型调用配额、分页、内容抹除、外键与保留清理；部署顺序为备份 → dry-run → 新迁移 → 同提交 Edge → 邮件模板 → 同提交前端。旧迁移不改写。
+
+若历史项目通过 SQL Editor 手动应用迁移、没有 `supabase_migrations.schema_migrations`，先对照生产结构、函数、约束、索引和触发器与历史迁移确认完全一致，再登记基线。无法建立数据库端口连接时，可以使用 Supabase CLI 2.119.0 的 `db query --linked --project-ref … --file …` 管理 API 通路，在同一事务中应用新增迁移并登记版本；不要把完整历史初始化脚本重跑到已有数据库。上线前必须保留一致的数据/结构备份并在克隆中演练。
+
 审核申诉的一键处理升级使用 `202610030001_integrated_resolution.sql`。管理员可通过申诉并恢复帖子或回应，同时结案；举报下架与结案也在同一事务中完成。权限、MFA 与操作说明仍由后端检查，内容变更后不能使用旧申诉直接恢复新版或私密草稿。
 
 现有已应用 `202610020002_owner_publish.sql` 的项目，只需应用新增的 `202610020003_ai_moderation.sql`，随后部署最新版 `api` 函数，最后发布前端。不要在生产项目重复执行旧版完整初始化脚本。
 
-社区条例位于 `community-rules.html`，规则版本为 `2026-10-02-v1`。发帖、回复及提交修改使用当前启用的 AI 供应商和服务端密钥。后台“审核模型”留空时沿用聊天模型；指定时必须是同一供应商支持的模型。连接测试只验证聊天模型，不能证明审核模型已可用。
+社区条例位于 `community-rules.html`，规则版本为 `2026-10-03-v2`。发帖、回复及提交修改使用当前启用的 AI 供应商和服务端密钥。后台“审核模型”留空时沿用聊天模型；指定时必须是同一供应商支持的模型。连接测试只验证聊天模型，不能证明审核模型已可用。
 
-审核只发送本次提交与必要的社区上下文，不发送私人 AI 对话或账户资料。请求失败、无可用配置、格式异常或判断不明时不自动发布，管理员可在审核队列处理。系统保存不可变审核快照，旧版本结果不能覆盖新编辑、删除或人工决定。AI 不自动封禁账户。
+审核只发送本次提交与必要的社区上下文，不发送私人 AI 对话或账户资料。请求失败、无可用配置、格式异常或判断不明时不自动发布，管理员可在审核队列处理。审核快照在保留期内不可变；删除对应内容时立即抹除，30 天后清空正文和上下文。旧版本结果不能覆盖新编辑、删除或人工决定。AI 不自动封禁账户。
+
+## 邮件链接升级
+
+浏览器拒绝包含 access_token/refresh_token 的隐式片段。站内发起的邮箱验证和密码恢复使用 PKCE，应在发起请求的浏览器里打开邮件。邀请与跨浏览器恢复可在 Supabase 邮件模板使用如下链接（type 按模板改为 invite / recovery / signup / magiclink）：
+
+`{{ .SiteURL }}?token_hash={{ .TokenHash }}&type=invite`
+
+仓库内四种邮件正文位于 `supabase/templates/`，`supabase/config.toml` 指向对应文件。`supabase config diff` 仅展示可比较的配置字段；`supabase config push` 会读取并上传邮件正文。生产注册开放前先确认自定义 SMTP 可投递，保留邮箱验证；受邀使用阶段可以暂时关闭生产注册。
+
+模板链接应直接指向正式根路径（带 quiet-harbor/），不要先跳到 Auth 的默认 verify URL 再生成片段。页面先显示明确确认，确认后调用 verifyOtp；邀请不会自动渲染设置密码。真实邀请、验证和恢复邮件必须在测试项目验收后再上线，旧片段邮件需重新发送。
+
+## 可追溯部署与数据保留
+
+在 GitHub 的 backend-production 环境设置 Secrets SUPABASE_ACCESS_TOKEN、SUPABASE_DB_PASSWORD，以及 Variables SUPABASE_PROJECT_REF、PUBLIC_SUPABASE_URL、PUBLIC_SITE_ORIGIN。手动触发 backend 工作流；它先运行 SQL/浏览器/语法/Deno 检查，再迁移和部署，将源提交与 UTC 构建时间写入 Edge。GET /functions/v1/api/health 只返回提交、时间和 schema 版本，不含账户或配置。工作流保存函数版本列表和部署验收记录。Pages 只有在后端提交匹配时才发布。
+
+启用 pg_cron 的项目由迁移安装每日 02:17 UTC 的清理任务；未启用时请启用该扩展并添加同一任务，或用服务端调度每天执行 select public.qh_cleanup()。API 访问也会触发每日一次的兜底清理，但不能代替无人访问时的定时任务。审核正文/上下文与举报申诉快照保留 30 天，用量/通知 90 天，操作记录 180 天。已超过保留期的未完成审核失效，过期申诉快照不能用于一键恢复。
+
+删除帖子和回应会抹除正文、修订与关联审核记录；站长可在用户管理中依据用户请求永久抹除账户。账户抹除保留日配额的全站已用总数，防止删除重建绕过当日额度。备份中的数据由备份期限控制：上线前配置自动备份最多 30 天，并登记删除请求，恢复备份后重新执行抹除；若供应商套餐无法满足该期限，应在社区条例明确实际期限再开放使用。
+
+构建生成 dist/security-headers.json 与 dist/_headers，预览服务下发 frame-ancestors 'none' 与 X-Frame-Options: DENY。GitHub Pages 不支持这类响应头文件，需要代理或其他主机才能提供响应头级保护；前端嵌入检查仅作为补充。Docker 构建需要传入公开参数 PUBLIC_SUPABASE_URL、PUBLIC_SUPABASE_ANON_KEY；AI Key 与服务端凭据仍仅放 Supabase Secrets。

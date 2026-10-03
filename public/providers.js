@@ -31,13 +31,3 @@ export function normalizeConfig(input){
  const tokenField=input.tokenField||preset.tokenField;if(!['max_tokens','max_completion_tokens'].includes(tokenField))throw new Error('输出参数无效。');
  return {provider:preset.id,name:preset.name,base,protocol,model,tokenField,jsonMode:!!input.jsonMode};
 }
-export function providerEnv(config,key){
- const c=normalizeConfig(config);
- return {AI_API_KEY:key,AI_ENDPOINT:c.base+(c.protocol==='anthropic'?'/messages':'/chat/completions'),AI_MODEL:c.model,AI_PROTOCOL:c.protocol,AI_TOKEN_FIELD:c.tokenField,AI_JSON_MODE:c.jsonMode};
-}
-export function packConnection(config,key){if(typeof key!=='string'||!key.trim()||/\s/.test(key)||key.length>1024)throw new Error('请输入有效的 API Key。');return JSON.stringify({kind:'quiet-harbor-connection',config:normalizeConfig(config),key});}
-export function unpackConnection(text){
- if(!text.startsWith('{'))return {config:normalizeConfig({...PROVIDERS[0],provider:'deepseek',jsonMode:true}),key:text};
- const value=JSON.parse(text);if(value.kind!=='quiet-harbor-connection')throw new Error('保存的连接格式无效。');
- const config=normalizeConfig(value.config);packConnection(config,value.key);return {config,key:value.key};
-}

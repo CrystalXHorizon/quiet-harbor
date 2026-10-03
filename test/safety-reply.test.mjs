@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runHarness as edgeHarness, mandatoryOutputCheck } from '../harness.mjs';
-import { runHarness as browserHarness } from '../public/harness.js';
+import { runHarness as browserHarness } from '../supabase/functions/_shared/harness.js';
 import { CRISIS_TEXT, BOUNDARY_TEXT } from '../public/safety.js';
 
 const env = { AI_API_KEY: 'test-only' };
@@ -105,23 +105,4 @@ test('the permissive filter still blocks markup and credential-shaped output', a
   for (const good of ['我不能建议你停用药物。', '我不能保证你一定会治愈。', '2026年10月1日那天的对话里，只有我妈理解我。']) {
     assert.equal(mandatoryOutputCheck(good), true);
   }
-});
-
-// --- The two copies must never drift ---------------------------------------------------
-test('the browser and Edge harness copies make identical decisions', async () => {
-  const script = () => [{ route: 'support', mode: 'listen' }, '嗯，我听着。', { safe: true }];
-  assert.deepEqual(
-    await edgeHarness(user('今天有点累。'), env, { fetchImpl: provider(script()) }),
-    await browserHarness(user('今天有点累。'), env, { fetchImpl: provider(script()) })
-  );
-  const crisisScript = () => [{ route: 'crisis' }, '你现在安全吗？', { safe: true }];
-  assert.deepEqual(
-    await edgeHarness(user('我不想活了'), env, { fetchImpl: provider(crisisScript()) }),
-    await browserHarness(user('我不想活了'), env, { fetchImpl: provider(crisisScript()) })
-  );
-  const offline = async () => { throw new Error('offline'); };
-  assert.deepEqual(
-    await edgeHarness(user('我想伤害自己'), env, { fetchImpl: offline }),
-    await browserHarness(user('我想伤害自己'), env, { fetchImpl: offline })
-  );
 });

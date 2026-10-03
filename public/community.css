@@ -4,3 +4,6 @@
 
 .qh-policy-link{display:inline-block;margin:4px 0 4px 8px;color:#315d73;text-decoration:underline;text-underline-offset:3px}.qh-policy-link:focus-visible{outline:3px solid #a8744e;outline-offset:3px}
 .qh-resolution-content{padding:1.15rem;background:var(--soft,#edf2f4);border:1px solid var(--line,#dce4e7);border-radius:14px;margin:1rem 0}.qh-resolution-content h4{margin-top:0}.qh-review-reason summary{cursor:pointer;font-weight:600}.qh-admin-group .qh-actions{flex-wrap:wrap}
+
+.qh-muted,.qh-meta,.qh-rules p,.qh-button.tab{color:#526770}.qh-button.qh-close{width:44px;height:44px;min-height:44px}
+@media(max-width:620px){.qh-button.text{min-height:44px;padding:8px 10px}}

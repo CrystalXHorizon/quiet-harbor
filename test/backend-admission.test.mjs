@@ -31,7 +31,7 @@ test('admission migration preserves members, gates pending accounts, reviews and
   assert.equal((await db.query("select has_function_privilege('service_role','qh_reserve_ai_admitted(uuid)','execute') allowed")).rows[0].allowed,false);
   await call(applicant,'admission.apply',{reason:'想加入互助社区'});
   assert.equal((await call(applicant,'me')).application.status,'pending');
-  assert.equal((await call(mod,'admin.applications')).items[0].id,applicant);
+  assert.equal((await call(mod,'admin.applications',{},true)).items[0].id,applicant);
   await assert.rejects(()=>call(mod,'admin.application.review',{id:applicant,status:'approved',reason:'欢迎'}),/mfa_required/);
   await call(mod,'admin.application.review',{id:applicant,status:'approved',reason:'欢迎'},true);
   assert.equal((await call(applicant,'me')).profile.admission_status,'approved');
@@ -40,12 +40,12 @@ test('admission migration preserves members, gates pending accounts, reviews and
   for(const action of ['admin.invites.list','admin.invites.create','admin.invites.update'])await assert.rejects(()=>call(mod,action,{},true),/forbidden/);
   await assert.rejects(()=>call(owner,'admin.invites.create',{code_hash:hash,code_hint:'AAAA',label:'test',max_uses:1}),/mfa_required/);
   const invitation=await call(owner,'admin.invites.create',{code_hash:hash,code_hint:'AAAA',label:'test',max_uses:1},true);
-  const list=await call(owner,'admin.invites.list');assert.equal(list.items[0].code_hash,undefined);
+  const list=await call(owner,'admin.invites.list',{},true);assert.equal(list.items[0].code_hash,undefined);
   assert.equal((await call(other,'admission.redeem',{code_hash:hash})).status,'approved');
   // A retry from the same user is idempotent, and a different user cannot exceed the last available use.
   await call(other,'admission.redeem',{code_hash:hash});
   assert.equal((await call(rejected,'admission.redeem',{code_hash:hash})).error_code,'invite_invalid');
-  assert.equal((await call(owner,'admin.invites.list')).items[0].used,1);
+  assert.equal((await call(owner,'admin.invites.list',{},true)).items[0].used,1);
   await call(rejected,'admission.apply',{reason:'申请'});
   await call(owner,'admin.application.review',{id:rejected,status:'rejected',reason:'请补充说明'},true);
   assert.equal((await call(rejected,'me')).application.review_reason,'请补充说明');
@@ -67,8 +67,8 @@ test('admission migration preserves members, gates pending accounts, reviews and
   assert.equal((await db.query("select used from qh_rate_limits where user_id=$1 and bucket='admission'",[guesser])).rows[0].used,10);
   assert.ok((await db.query("select count(*)::integer n from qh_audit where action like 'admission.%' or action like 'invite.%'")).rows[0].n>=9);
   for(let n=0;n<21;n++)await call(owner,'admin.invites.create',{code_hash:n.toString(16).padStart(64,'0'),code_hint:'TEST',label:'page',max_uses:1},true);
-  const first=await call(owner,'admin.invites.list',{page:0});
-  const second=await call(owner,'admin.invites.list',{page:1});
+  const first=await call(owner,'admin.invites.list',{page:0},true);
+  const second=await call(owner,'admin.invites.list',{page:1},true);
   assert.equal(first.items.length,20);assert.equal(first.hasMore,true);
   assert.equal(second.items.length,5);assert.equal(second.hasMore,false);
   assert.equal(new Set([...first.items,...second.items].map(item=>item.id)).size,25);

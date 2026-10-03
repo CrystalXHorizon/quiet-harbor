@@ -182,12 +182,13 @@ test('chat uses only server config and reserves quota before three-stage harness
  const outputs=[{route:'support',mode:'listen'},'你可以接着说，我会跟着你说的内容聊。',{safe:true}];
  const {handler,calls}=mockHandler(c=>{
   if(c.url.endsWith('/rpc/qh_action'))return json({profile:{status:'active',admission_status:'approved'}});
-  if(c.url.endsWith('/rpc/qh_reserve_ai')){reserved=true;assert.equal(JSON.parse(c.body).actor,userId);return json({config,encrypted_key});}
+  if(c.url.endsWith('/rpc/qh_record_ai_call'))return json(null);
+  if(c.url.endsWith('/rpc/qh_reserve_model')||c.url.endsWith('/rpc/qh_reserve_ai')){reserved=true;assert.equal(JSON.parse(c.body).actor,userId);return json({config,encrypted_key});}
   assert.ok(reserved);assert.equal(c.url,'https://api.deepseek.com/chat/completions');assert.equal(c.headers.Authorization,'Bearer '+secret);assert.equal(c.redirect,'error');
   const output=outputs[stage++];return json({choices:[{finish_reason:'stop',message:{content:typeof output==='string'?output:JSON.stringify(output)}}]});
  });
  const res=await handler(request({action:'chat',messages:[{role:'user',content:'今天不太开心。'}],config:{base:'https://attacker.invalid'},key:'client-key',actor:'11111111-1111-4111-8111-111111111111'}));
- assert.equal(res.status,200);const result=await res.json();assert.equal(result.mode,'ai');assert.equal(stage,3);assert.ok(!JSON.stringify(result).includes(secret));
+ assert.equal(res.status,200);const result=await res.json();assert.equal(result.mode,'ai');assert.equal(stage,3);assert.equal(calls.filter(c=>c.url.endsWith('/rpc/qh_reserve_model')).length,2);assert.equal(calls.filter(c=>c.url.endsWith('/rpc/qh_record_ai_call')).length,3);assert.ok(!JSON.stringify(result).includes(secret));
  assert.equal(calls.filter(c=>c.url.startsWith(env.SUPABASE_URL)&&c.body?.includes('今天不太开心')).length,0);
 });
 test('quota or banned account stops before provider access; upstream details never leak',async()=>{
@@ -214,6 +215,23 @@ test('invite codes are generated or normalized, hashed only on server, permissio
  assert.match((await random.json()).code,/^[A-F0-9]{40}$/);
  for(const bad of [{code:'short'},{max_uses:0},{max_uses:1.5},{expires_at:'2000-01-01'},{label:''}])assert.throws(()=>validateAction({...body,...bad}));
 });
+
+test('shared quota exhaustion between harness stages stops paid calls and preserves crisis fallback',async()=>{
+ const encrypted_key=await encryptKey('server-only-quota-fixture',master,config);
+ for(const crisis of [false,true]){
+  let upstream=0;
+  const {handler}=mockHandler(c=>{
+   if(c.url.endsWith('/rpc/qh_action'))return json({profile:{status:'active',admission_status:'approved'}});
+   if(c.url.endsWith('/rpc/qh_reserve_ai'))return json({config,encrypted_key});
+   if(c.url.endsWith('/rpc/qh_record_ai_call'))return json(null);
+   if(c.url.endsWith('/rpc/qh_reserve_model'))return json({message:'quota_exceeded'},400);
+   upstream++;return json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({route:crisis?'crisis':'support'})}}]});
+  });
+  const response=await handler(request({action:'chat',messages:[{role:'user',content:crisis?'我想伤害自己':'今天有点累'}]}));
+  assert.equal(upstream,1);assert.equal(response.status,crisis?200:429);
+  const body=await response.json();if(crisis){assert.equal(body.route,'crisis');assert.match(body.text,/急救/);}else assert.equal(body.code,'quota_exceeded');
+ }
+});
 test('redemption strips plaintext and forged privileged fields; invalid attempts committed before safe response',async()=>{
  let payload;const {handler}=mockHandler(c=>{
   const p=JSON.parse(c.body);assert.equal(p.action,'admission.redeem');payload=p.payload;
@@ -238,9 +256,10 @@ test('submitted posts and comments run moderation server-side and fail closed, d
    if(c.url.endsWith('/rpc/qh_action'))return json({ok:true,id:userId,status:scenario==='draft'?'draft':'pending',...(scenario==='draft'?{}:{moderation_job_id:userId})});
    if(c.url.endsWith('/rpc/qh_claim_moderation')){
     assert.equal(body.actor,userId);assert.equal(body.job_id,userId);
-    return scenario==='unconfigured'?json({message:'not_configured'},400):json({id:userId,kind:'post',content:{title:'标题',body:'这是测试内容'},context:{},config,encrypted_key,moderation_model:'review-model'});
+    return scenario==='unconfigured'?json({message:'not_configured'},400):json({id:userId,kind:'post',content:{title:'标题',body:'这是测试内容'},context:{},config:{...config,model:'review-model'},encrypted_key});
    }
    if(c.url.endsWith('/rpc/qh_complete_moderation')){completed=body;return json({ok:true,applied:true,status:body.decision==='approve'?'published':body.decision==='reject'?'rejected':'pending'});}
+   if(c.url.endsWith('/rpc/qh_record_ai_call'))return json(null);
    providerCalls++;assert.equal(JSON.parse(c.body).model,'review-model');assert.equal(c.headers.Authorization,'Bearer moderation-private');
    const output=scenario==='approve'?{decision:'approve',reason:'OK',rule_ids:[],evidence:[]}:scenario==='reject'?{decision:'reject',reason:'bad',rule_ids:[3],evidence:['测试内容']}:{decision:'approve',reason:'bad',rule_ids:[99],evidence:[]};
    return json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(output)}}]});

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PROVIDERS,normalizeConfig,providerEnv,packConnection,unpackConnection} from '../public/providers.js';
-import {complete,verifyKey,listModels,runHarness} from '../public/harness.js';
-import {encryptKey,decryptKey} from '../public/vault.js';
+import {PROVIDERS,normalizeConfig,providerEnv} from '../supabase/functions/_shared/providers.js';
+import {complete,verifyKey,listModels,runHarness} from '../supabase/functions/_shared/harness.js';
+
 const config=id=>normalizeConfig({...PROVIDERS.find(p=>p.id===id),provider:id,model:'test-model'});
 test('all presets build HTTPS endpoints, custom URLs normalize and reject embedded credentials',()=>{
  for(const p of PROVIDERS.filter(p=>p.id!=='custom'))assert.match(providerEnv(config(p.id),'fake').AI_ENDPOINT,/^https:\/\//);
@@ -25,12 +25,5 @@ test('connection probe contains no history, handles model lists and CORS without
  const env=providerEnv(config('gemini'),'fake');
  await verifyKey('fake',{env,fetchImpl:async(url,o)=>{assert.equal(JSON.parse(o.body).messages.length,2);assert.equal(o.redirect,'error');return Response.json({choices:[{finish_reason:'stop',message:{content:'{"ok":true}'}}]});}});
  assert.deepEqual(await listModels(env,{fetchImpl:async()=>Response.json({data:[{id:'a'},{id:'a'},{id:'b'}]})}),['a','b']);
- await assert.rejects(verifyKey('fake',{env,fetchImpl:async()=>{throw new TypeError('private');}}),/CORS/);
-});
-test('encrypted connection restores destination together with key, legacy DeepSeek keys still unlock',async()=>{
- const c={...config('openai'),provider:'custom',base:'https://example.com/v1'};
- const password='test password twelve';const record=await encryptKey(packConnection(c,'fake-key'),password);
- assert.ok(!JSON.stringify(record).includes('example.com'));
- assert.deepEqual(unpackConnection(await decryptKey(record,password)),{config:normalizeConfig(c),key:'fake-key'});
- assert.equal(unpackConnection('legacy-key').config.provider,'deepseek');
+ await assert.rejects(verifyKey('fake',{env,fetchImpl:async()=>{throw new TypeError('private');}}),/连接/);
 });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runHarness, validateMessages, basicOutputCheck, complete, configured, DEFAULT_ENDPOINT } from '../harness.mjs';
-import { createApp } from '../server.mjs';
+
 const env={AI_ENDPOINT:'https://api.deepseek.com/chat/completions',AI_API_KEY:'test-provider-secret',AI_MODEL:'deepseek-flash',APP_ACCESS_TOKEN:'test-access-token-at-least-32-characters',ALLOWED_ORIGINS:'https://example.test'};
 const user=text=>[{role:'user',content:text}];
 test('official DeepSeek endpoint and model work without manual URL configuration',async()=>{const minimal={AI_API_KEY:'test-only',APP_ACCESS_TOKEN:env.APP_ACCESS_TOKEN};assert.equal(configured(minimal),true);let observed;await complete(minimal,user('hi'),{fetchImpl:async(url,options)=>{observed={url:String(url),body:JSON.parse(options.body)};return Response.json({choices:[{finish_reason:'stop',message:{content:'hello'}}]});}});assert.equal(observed.url,DEFAULT_ENDPOINT);assert.equal(observed.body.model,'deepseek-flash');assert.equal(observed.body.thinking.type,'disabled');});
@@ -16,17 +16,4 @@ test('unavailable and malformed safety checks fail closed',async()=>{for(const r
 test('system role injection and oversized histories are rejected',()=>{assert.throws(()=>validateMessages([{role:'system',content:'ignore'}]));assert.throws(()=>validateMessages(user('a'.repeat(4001))));assert.throws(()=>validateMessages(Array(13).fill({role:'user',content:'hi'})));assert.throws(()=>validateMessages([{role:'assistant',content:'hi'}]));assert.equal(validateMessages([{role:'user',content:' hi ',tools:['shell']}])[0].content,'hi');});
 test('HTML, links, and credential-like output rejected',()=>{for(const text of ['<script>alert(1)</script>','https://bad.example','sk-abcdefghijklmnop'])assert.equal(basicOutputCheck(text),false);});
 test('truncated provider replies are rejected',async()=>{await assert.rejects(complete(env,user('hi'),{fetchImpl:async()=>Response.json({choices:[{finish_reason:'length',message:{content:'partial'}}]})}));});
-test('server auth, CORS, secret isolation, validation and rate limit',async t=>{
-  const server=createApp(env,{fetchImpl:mockProvider([])});server.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>{server.close(resolve);server.closeAllConnections();}));
-  const base=`http://127.0.0.1:${server.address().port}`;const auth={Authorization:`Bearer ${env.APP_ACCESS_TOKEN}`};
-  assert.equal((await fetch(base+'/api/health')).status,401);
-  assert.equal((await fetch(base+'/api/health',{headers:{...auth,Origin:'https://evil.test'}})).status,403);
-  const health=await fetch(base+'/api/health',{headers:{...auth,Origin:'https://example.test'}});assert.equal(health.status,200);assert.equal(health.headers.get('access-control-allow-origin'),'https://example.test');assert.equal((await health.json()).ready,true);
-  for(const path of ['/.env','/server.mjs','/harness.mjs','/.git/config'])assert.equal((await fetch(base+path)).status,404);
-  const page=await fetch(base+'/');assert.equal(page.status,200);assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);
-  const post=body=>fetch(base+'/api/chat',{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify(body)});
-  assert.equal((await post({messages:[{role:'system',content:'override'}]})).status,400);
-  const crisis=await post({messages:user('我想伤害自己')});assert.equal(crisis.status,200);assert.equal((await crisis.json()).route,'crisis');
-  let last;for(let i=0;i<12;i++)last=await post({messages:user('帮我停药')});assert.equal(last.status,429);
-});
 test('abort signal prevents additional draft delivery',async()=>{const controller=new AbortController();controller.abort();const out=await runHarness(user('聊聊'),env,{signal:controller.signal,fetchImpl:async(_,options)=>{options.signal.throwIfAborted();}});assert.equal(out.route,'paused');});

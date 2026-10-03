@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runHarness, conversationInstruction, CONVERSATION_PROMPT } from '../public/harness.js';
+import { runHarness, conversationInstruction, CONVERSATION_PROMPT } from '../supabase/functions/_shared/harness.js';
 import { demoReply } from '../public/safety.js';
 
 test('turn mode is an allowlisted hint, never an arbitrary instruction',()=>{

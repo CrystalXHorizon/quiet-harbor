@@ -10,7 +10,11 @@ async function check(dir){
   }
  }
 }
-await Promise.all(['public','scripts','supabase/functions'].map(check));
-const app=await readFile('public/app.js','utf8');
-if(/runHarness|providerEnv|AI_API_KEY|verifyKey/.test(app))throw new Error('The browser chat path must only call the authenticated backend');
+await Promise.all(['public','scripts','supabase/functions','test'].map(check));
+const root=spawnSync(process.execPath,['--check','harness.mjs'],{stdio:'inherit'});
+if(root.status!==0)process.exit(root.status||1);
+for(const file of (await readdir('public')).filter(f=>f.endsWith('.js'))){
+ const source=await readFile('public/'+file,'utf8');
+ if(/runHarness|providerEnv|AI_API_KEY|verifyKey/.test(source))throw new Error(file+': browser modules must only call the authenticated backend');
+}
 console.log('JavaScript syntax and backend-only chat path checked');

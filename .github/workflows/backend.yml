@@ -1,0 +1,53 @@
+name: Check and deploy backend
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: quiet-harbor-backend
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: backend-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test && npm run check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check supabase/functions/api/index.ts
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Apply migrations and deploy matching Edge source
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_REF"
+          supabase db push --dry-run
+          supabase db push
+          node scripts/stamp-backend.mjs
+          supabase functions deploy api
+          supabase functions list --output json > backend-function-versions.json
+      - name: Check deployed schema and commit
+        env:
+          PUBLIC_SUPABASE_URL: ${{ vars.PUBLIC_SUPABASE_URL }}
+          PUBLIC_SITE_ORIGIN: ${{ vars.PUBLIC_SITE_ORIGIN }}
+        run: node scripts/backend-health.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-deployment
+          path: |
+            backend-deployment.json
+            backend-function-versions.json

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { verifyKey, runHarness, DEFAULT_MODEL } from '../public/harness.js';
+import { verifyKey, runHarness, DEFAULT_MODEL } from '../supabase/functions/_shared/harness.js';
 test('direct key validation only sends authorization to official endpoint',async()=>{
   let request;
   assert.equal(await verifyKey('test-only',{fetchImpl:async(url,options)=>{request={url,options};return Response.json({data:[{id:DEFAULT_MODEL}]});}}),true);

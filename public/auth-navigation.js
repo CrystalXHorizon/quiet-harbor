@@ -1,16 +1,20 @@
 export function authNavigation(href) {
   const url = new URL(href);
   const fragment = new URLSearchParams(url.hash.slice(1));
-  const type = fragment.get('type');
   const requested = url.searchParams.get('account');
-  const recovery = type === 'recovery' || requested === 'recovery';
-  const invitation = type === 'invite';
-  const callbackError = fragment.has('error') || fragment.has('error_code') || url.searchParams.has('error');
+  const rejected = fragment.has('access_token') || fragment.has('refresh_token');
+  const type = url.searchParams.get('type');
+  const tokenHash = url.searchParams.get('token_hash');
+  const emailLink = !rejected && tokenHash && ['invite', 'recovery', 'email', 'signup', 'magiclink'].includes(type)
+    ? { type, tokenHash } : null;
+  const recovery = !rejected && requested === 'recovery';
+  const invitation = emailLink?.type === 'invite';
+  const callbackError = rejected || fragment.has('error') || fragment.has('error_code') || url.searchParams.has('error');
   return {
-    recovery, invitation, callbackError,
+    recovery, invitation, callbackError, rejected, emailLink,
     reset: requested === 'reset' || callbackError,
-    open: recovery || invitation || callbackError || ['reset', 'login'].includes(requested) || url.searchParams.has('code'),
-    implicit: fragment.has('access_token') && ['invite', 'recovery', 'signup', 'magiclink'].includes(type)
+    open: recovery || Boolean(emailLink) || callbackError || ['reset', 'login'].includes(requested) || url.searchParams.has('code'),
+    implicit: false
   };
 }
 

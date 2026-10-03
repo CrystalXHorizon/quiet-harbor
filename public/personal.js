@@ -1,3 +1,4 @@
+import {chineseValidation} from './form-validation.js';
 const TABS={posts:'我的帖子',replies:'我的回复',bookmarks:'我的收藏',appeals:'我的申诉',notifications:'通知',settings:'个人设置'};
 const STATUSES={draft:'草稿',pending:'待审核',published:'已发布',rejected:'未通过',hidden:'已隐藏',open:'待处理',resolved:'已处理'};
 const AVATARS={harbor:'⚓ 港湾',leaf:'☘ 绿叶',moon:'☾ 月亮',sun:'☀ 太阳',wave:'≈ 海浪',star:'☆ 星星'};
@@ -5,7 +6,7 @@ const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefine
 const btn=(text,action,kind='secondary')=>{const b=el('button',text,`qh-button ${kind}`);b.type='button';b.addEventListener('click',action);return b;};
 const date=value=>{const d=new Date(value);return Number.isNaN(d.getTime())?'':d.toLocaleString('zh-CN');};
 const row=(...nodes)=>{const n=el('div',undefined,'qh-actions');n.append(...nodes);return n;};
-const field=(label,type,value,max)=>{const wrap=el('label',undefined,'qh-field'),input=el(type==='textarea'?'textarea':'input');if(type!=='textarea')input.type=type;input.value=value||'';if(max)input.maxLength=max;wrap.append(el('span',label),input);return {wrap,input};};
+const field=(label,type,value,max)=>{const wrap=el('label',undefined,'qh-field'),input=el(type==='textarea'?'textarea':'input');if(type!=='textarea')input.type=type;input.value=value||'';if(max)input.maxLength=max;chineseValidation(input);wrap.append(el('span',label),input);return {wrap,input};};
 
 /** Uses only community/account API responses, never private conversations. */
 export function initPersonal({api,getSession,onRequireAuth,onAccountSettings,onEditPost,onOpenPost,onAppealPost,onAppealComment,onDeleteComment,onBlocks,onProfileRefresh,onUnreadChange}){

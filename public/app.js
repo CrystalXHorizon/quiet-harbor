@@ -1,13 +1,17 @@
 import {initAuth} from './auth-bundle.js';
 import {initCommunity} from './community.js';
 import {initPersonal} from './personal.js';
+import {chatAccess} from './chat-state.js';
 import { quickRoute, demoReply, CRISIS_TEXT } from './safety.js';
 import {strategies,strategyMessages} from './strategies.js';
+// GitHub Pages cannot set frame-ancestors headers. Stop initialization if embedded.
+if(window.self!==window.top){document.body.replaceChildren();throw new Error('Embedding is disabled');}
 const $ = id => document.getElementById(id);
 let history = [], pending = null, generation = 0, step = 0, started = Date.now();
 let strategyPending=null, backend=null, community=null, personal=null, currentAccountId=null, currentAccess='', currentMfa=false;
 const session=()=>backend?.getSession();
 function showView(name){
+ $('status').textContent='';
  for(const id of ['chat','community','personal','admin']){$(id+'-view').hidden=id!==name;const b=$(id+'-nav');b.classList.toggle('active',id===name);if(id===name)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');}
  $('current-view-label').textContent={chat:'与我聊聊',community:'互助社区',personal:'我的',admin:'管理后台'}[name];
 }
@@ -32,7 +36,7 @@ function onAuthChange(state){
 }
 
 function cancelStrategy(){strategyPending?.abort();strategyPending=null;$('strategy-generate').disabled=false;$('strategy-stop').hidden=true;}
-function openDialog(id) { const d = $(id); if (!d.open) d.showModal(); }
+function openDialog(id) { const d = $(id); if (!d.open) d.showModal(); if(id==='help-dialog'){const title=$('help-title');title.tabIndex=-1;title.focus();} }
 function addMessage(role, text, label) {
   const row = document.createElement('article'); row.className = `message ${role}`;
   if (role !== 'user') { const img = document.createElement('img'); img.src = './favicon.svg'; img.alt = ''; img.className = 'avatar'; row.append(img); }
@@ -49,31 +53,34 @@ function trimHistory() { history = history.slice(-12); while (history.reduce((n,
 function resetChat() { cancel(); history = []; resetMood(); $('conversation').replaceChildren(); $('message').value = ''; started = Date.now(); welcome(); }
 async function sendMessage() {
   const text = $('message').value.trim(); if (!text || pending) return;
-  if(session()?.mfaRequired&&quickRoute(text)!=='crisis'){openAccount();return;}
+  const access=chatAccess(session());
+  if(access==='loading'){ $('status').textContent='账户资料正在加载或暂不可用，请在我的账户中刷新后重试。'; openAccount(); return; }
+  if(access==='blocked'){ $('status').textContent='账户已停用，请联系站长。'; return; }
+  if(access==='mfa'&&quickRoute(text)!=='crisis'){openAccount();return;}
   $('message').value = ''; addMessage('user', text); history.push({ role:'user', content:text }); trimHistory();
-  const localOnly = Boolean(session()?.mfaRequired) || !session()?.profile || (session().profile.status!=='banned'&&session().profile.admission_status!=='approved');
+  const localOnly = ['local','mfa'].includes(access);
   // A word filter cannot tell a film plot from a disclosure, so the local crisis text is only
   // the offline net. While the backend is reachable it decides the route — it sees the context.
   if (localOnly && quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); return; }
-  if (!session()?.profile || (session().profile.status!=='banned'&&session().profile.admission_status!=='approved')) { const reply = demoReply(text, history.filter(m => m.role === 'user').length - 1); addMessage('assistant', reply.text, '留岸 · 本地预设回复'); history.push({ role:'assistant', content:reply.text }); trimHistory(); $('status').textContent = '这是本地预设回复。登录并通过加入申请，或使用邀请码后，可使用站点 AI。'; return; }
+  if (access === 'local') { const reply = demoReply(text, history.filter(m => m.role === 'user').length - 1); addMessage('assistant', reply.text, '留岸 · 本地预设回复'); history.push({ role:'assistant', content:reply.text }); trimHistory(); $('status').textContent = '这是本地预设回复。登录并通过加入申请，或使用邀请码后，可使用站点 AI。'; return; }
   const requestId = ++generation; const controller = new AbortController(); pending = controller; setBusy(true);
   $('status').textContent = '正在倾听，并检查回答是否合适……';
-  const timeout = setTimeout(() => controller.abort(), 95000);
+  const timeout = setTimeout(() => controller.abort(), 240000);
   try {
     const data = await backend.api('chat',{messages:history},{signal:controller.signal});
-    if (typeof data.text !== 'string' || data.text.length > 8000) throw new Error('收到了无法显示的回答，请重试。');
+    if (!data || typeof data !== 'object' || typeof data.text !== 'string' || data.text.length > 8000) throw new Error('收到了无法显示的回答，请重试。');
     if (generation !== requestId) return;
     addMessage(data.route === 'crisis' ? 'notice' : 'assistant', data.text, data.mode === 'ai' ? '留岸 · AI' : '留岸 · 保护提示');
     history.push({role:'assistant',content:data.text}); trimHistory();
     $('status').textContent = data.mode === 'ai' ? '回复已完成检查。检查仍可能遗漏问题，请以专业支持为准。' : '这是一条安全提示，不是普通回复。';
     if (data.route === 'crisis') openDialog('help-dialog');
     if (Date.now() - started > 20*60*1000) { $('status').textContent += ' 已聊了一会儿，你可以休息一下。'; started = Date.now(); }
-  } catch (error) { if (generation === requestId) { if (quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); } else { $('status').textContent = controller.signal.aborted ? '请求已停止或超时。你可以稍后重试。' : error.message; addMessage('notice', '这次没能完成回复。你刚才的话仍在页面里；可以稍后再试，或先停一会儿。', '连接提示'); } } }
+  } catch (error) { if (generation === requestId) { if (quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); } else { $('status').textContent = controller.signal.aborted ? '请求已停止或超时。已预留的模型调用额度仍计入今日用量；你可以稍后重试。' : error.isBackendError ? error.message : '连接暂时不可用，请稍后重试。'; addMessage('notice', '这次没能完成回复。你刚才的话仍在页面里；可以稍后再试，或先停一会儿。', '连接提示'); } } }
   finally { clearTimeout(timeout); if (generation === requestId) { pending = null; setBusy(false); $('message').focus(); } }
 }
 $('chat-form').addEventListener('submit', e => {e.preventDefault(); void sendMessage();});
 $('message').addEventListener('keydown', e => {if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {e.preventDefault(); void sendMessage();}});
-$('stop').onclick = () => {cancel(); $('status').textContent = '已停止等待回复。服务商可能已经接收了请求。';};
+$('stop').onclick = () => {cancel(); $('status').textContent = '已停止等待回复。已预留的模型调用额度仍会计入今日用量；服务商可能已经接收了请求。';};
 $('clear').onclick = () => { resetChat(); $('status').textContent = '当前页面的对话已清空；不会删除服务商按其政策保留的请求。'; };
 $('chat-nav').onclick = () => {showView('chat');$('message').focus();};
 $('community-nav').onclick=()=>{if(!community){$('status').textContent='社区功能正在加载，请稍后再试。';return;}showView('community');void community.showCommunity();};
@@ -125,9 +132,9 @@ $('strategy-generate').onclick=async()=>{
  if(pending){$('strategy-result').textContent='请等这条聊天回复结束，或先停止回复。';return;}
  let messages;try{messages=strategyMessages(history);}catch(error){$('strategy-result').textContent=error.message;return;}
  const controller=new AbortController();strategyPending=controller;$('strategy-generate').disabled=true;$('strategy-stop').hidden=false;$('strategy-result').textContent='正在结合最近的聊天选择方法，并检查建议……';
- const timeout=setTimeout(()=>controller.abort(),95000);
- try{const result=await backend.api('chat',{messages},{signal:controller.signal});if(strategyPending!==controller)return;$('strategy-result').textContent=(result.mode==='ai'?'根据当前聊天的建议\n\n':'支持提示\n\n')+result.text;if(result.route==='crisis'){$('ground-dialog').close();openDialog('help-dialog');}}
- catch(error){if(strategyPending===controller)$('strategy-result').textContent=controller.signal.aborted?'请求已超时。可以先选一种通用方法，稍后再试。':error.message;}
+ const timeout=setTimeout(()=>controller.abort(),240000);
+ try{const result=await backend.api('chat',{messages},{signal:controller.signal});if(strategyPending!==controller)return;if(!result||typeof result.text!=='string'||result.text.length>8000)throw new Error('Invalid response');$('strategy-result').textContent=(result.mode==='ai'?'根据当前聊天的建议\n\n':'支持提示\n\n')+result.text;if(result.route==='crisis'){$('ground-dialog').close();openDialog('help-dialog');}}
+ catch(error){if(strategyPending===controller)$('strategy-result').textContent=controller.signal.aborted?'请求已超时。已预留的调用额度仍计入今日用量；可以先选一种通用方法，稍后再试。':error.isBackendError?error.message:'连接暂时不可用，请稍后重试。';}
  finally{clearTimeout(timeout);if(strategyPending===controller)cancelStrategy();}
 };
 document.querySelectorAll('[data-help]').forEach(b => b.onclick=() => openDialog('help-dialog'));

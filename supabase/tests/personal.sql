@@ -12,7 +12,7 @@ begin
  r:=public.qh_action(b,'profiles.get',jsonb_build_object('user_id',a));
  if r->'profile'->>'bio'<>'' or r->'profile' ? 'role' or r->'profile' ? 'status' or r->'profile' ? 'email' then raise exception 'public profile leaked private fields';end if;
  if r->'profile'->>'nickname'<>'A' or r->'profile'->>'avatar'<>'moon' then raise exception 'profile partial update destroyed nickname';end if;
- r:=public.qh_action(a,'admin.users');
+ r:=public.qh_action(a,'admin.users','{}',true);
  if exists(select 1 from jsonb_array_elements(r->'users') x where x ? 'bio' or x ? 'public_bio') then raise exception 'admin users leaked private biography';end if;
  perform public.qh_action(a,'profile.update','{"public_bio":true}');
  r:=public.qh_action(b,'profiles.get',jsonb_build_object('user_id',a));
