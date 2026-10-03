@@ -61,7 +61,7 @@ begin
  perform public.qh_action(o,'reports.create',jsonb_build_object('post_id',p,'reason','review post'));
  r:=public.qh_action(m,'admin.queue');
  if jsonb_array_length(r->'comments')<>1 or jsonb_array_length(r->'reports')<>1 or jsonb_array_length(r->'appeals')<>1 then raise exception 'populated moderation queue incomplete'; end if;
- if r->'reports'->0->>'target_body'<>'Approved body' or r->'appeals'->0->>'target_title'<>'Original' then raise exception 'queue joined wrong record'; end if;
+ if r->'reports'->0->>'target_body'<>'Approved body' or r->'appeals'->0->>'target_title'<>'Revision' or r->'appeals'->0->>'target_body'<>'UNREVIEWED' then raise exception 'queue joined wrong record'; end if;
  if r::text like '%PRIVATE DRAFT%' then raise exception 'queue exposes draft'; end if;
  r:=public.qh_action(b,'posts.get',jsonb_build_object('id',p));if jsonb_array_length(r->'comments')<>0 then raise exception 'pending comment leaked';end if;
  perform public.qh_action(m,'admin.moderate',jsonb_build_object('kind','comment','id',comment_id,'decision','approve','reason','ok'),true);
@@ -143,6 +143,41 @@ begin
 end $$;
 
 -- Actual low-privilege execution: grants must fail, regardless of RLS policy defaults.
+do $$
+declare a uuid:='11111111-1111-4111-8111-111111111111';b uuid:='22222222-2222-4222-8222-222222222222';m uuid:='33333333-3333-4333-8333-333333333333';
+ r jsonb;pid uuid;cid uuid;aid uuid;reportid uuid;denied boolean;
+ fields jsonb:='{"title":"Resolution","body":"Original appeal content","category":"share","preference":"listen","submit":true}';
+begin
+ update public.qh_profiles set status='active',admission_status='approved' where id in (a,b,m);
+ r:=public.qh_action(b,'posts.save',fields);pid:=(r->>'id')::uuid;
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','post','id',pid,'decision','reject','reason','需复核'),true);
+ r:=public.qh_action(b,'appeals.create',jsonb_build_object('post_id',pid,'reason','请求人工复核'));aid:=(r->>'id')::uuid;
+ r:=public.qh_action(a,'admin.queue');
+ if not exists(select 1 from jsonb_array_elements(r->'appeals') e where e->>'id'=aid::text and e->>'target_body'='Original appeal content' and (e->>'can_restore')::boolean) then raise exception 'appeal queue missing original content';end if;
+ denied:=false;begin perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','appeal','id',aid,'decision','restore','reason','恢复'),false);exception when others then denied:=sqlerrm='mfa_required';end;
+ if not denied or (select status from public.qh_appeals where id=aid)<>'open' or (select status from public.qh_posts where id=pid)<>'rejected' then raise exception 'restore bypassed MFA';end if;
+ perform public.qh_action(m,'admin.moderate',jsonb_build_object('kind','appeal','id',aid,'decision','restore','reason','复核通过并恢复'),true);
+ if (select status from public.qh_posts where id=pid)<>'published' or (select status from public.qh_appeals where id=aid)<>'resolved' then raise exception 'post restoration not atomic';end if;
+ r:=public.qh_action(b,'comments.save',jsonb_build_object('post_id',pid,'body','Appealed reply'));cid:=(r->>'id')::uuid;
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','comment','id',cid,'decision','reject','reason','需复核'),true);
+ r:=public.qh_action(b,'appeals.create',jsonb_build_object('comment_id',cid,'reason','复核回应'));aid:=(r->>'id')::uuid;
+ perform public.qh_action(m,'admin.moderate',jsonb_build_object('kind','appeal','id',aid,'decision','restore','reason','回应复核通过'),true);
+ if (select status from public.qh_comments where id=cid)<>'published' or (select status from public.qh_appeals where id=aid)<>'resolved' then raise exception 'reply restoration not atomic';end if;
+ r:=public.qh_action(b,'reports.create',jsonb_build_object('post_id',pid,'reason','请求下架'));reportid:=(r->>'id')::uuid;
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','report','id',reportid,'decision','hide','reason','下架并结案'),true);
+ if (select status from public.qh_posts where id=pid)<>'hidden' or (select status from public.qh_reports where id=reportid)<>'resolved' then raise exception 'report resolution not atomic';end if;
+ r:=public.qh_action(b,'appeals.create',jsonb_build_object('post_id',pid,'reason','请求恢复'));aid:=(r->>'id')::uuid;
+ perform public.qh_action(b,'posts.save',fields||jsonb_build_object('id',pid,'body','New private draft','submit',false));
+ denied:=false;begin perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','appeal','id',aid,'decision','restore','reason','恢复'),true);exception when others then denied:=sqlerrm in ('content_changed','not_found');end;
+ if not denied or (select status from public.qh_posts where id=pid)<>'draft' or (select status from public.qh_appeals where id=aid)<>'open' then raise exception 'old appeal exposed new draft';end if;
+ r:=public.qh_action(m,'posts.save',fields);pid:=(r->>'id')::uuid;
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','post','id',pid,'decision','approve','reason','发布'),true);
+ r:=public.qh_action(b,'reports.create',jsonb_build_object('post_id',pid,'reason','复核'));reportid:=(r->>'id')::uuid;
+ denied:=false;begin perform public.qh_action(m,'admin.moderate',jsonb_build_object('kind','report','id',reportid,'decision','hide','reason','自己下架'),true);exception when others then denied:=sqlerrm='self_moderation';end;
+ if not denied or (select status from public.qh_posts where id=pid)<>'published' or (select status from public.qh_reports where id=reportid)<>'open' then raise exception 'failed moderation partially resolved report';end if;
+ if has_function_privilege('service_role','public.qh_action_before_resolution(uuid,text,jsonb,boolean)','execute') or has_function_privilege('authenticated','public.qh_review_snapshot(uuid,uuid)','execute') then raise exception 'private resolution function exposed';end if;
+end $$;
+
 set local role authenticated;
 do $$ declare denied boolean; begin
  denied:=false;begin perform * from public.qh_ai_settings;exception when insufficient_privilege then denied:=true;end;

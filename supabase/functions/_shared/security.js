@@ -11,6 +11,7 @@ const messages={
  not_configured:'AI 服务尚未启用，请联系站长。', provider_failed:'AI 服务暂时无法完成请求，请稍后再试。',
  origin_forbidden:'此网页地址尚未获准连接服务。', payload_too_large:'提交内容太长，请缩短后重试。',
  self_moderation:'请由另一位管理员审核你自己发布的内容。', duplicate:'已经提交过，请等待处理。',
+ content_changed:'相关内容已更新，请刷新队列并重新查看后处理。',
  key_required:'更换供应商地址或协议时，请重新填写 API Key。', internal:'服务暂时不可用，请稍后再试。'
 };
 export function errorResponse(error) {
