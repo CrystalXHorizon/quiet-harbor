@@ -84,7 +84,7 @@ export function validateAction(input) {
  const required={
   'profile.update':['nickname'],'posts.get':['id'],'posts.save':['title','body','category','preference','submit'],'posts.delete':['id'],'posts.comments':['id','open'],
   'comments.save':['post_id','body'],'comments.delete':['id'],'bookmarks.toggle':['post_id'],'blocks.toggle':['user_id'],'reports.create':['reason'],
-  'appeals.create':['post_id','reason'],'admin.moderate':['kind','id','decision','reason'],'admin.user':['id','reason'],
+  'appeals.create':['reason'],'admin.moderate':['kind','id','decision','reason'],'admin.user':['id','reason'],
   'admin.ai.save':['config','enabled','user_daily_limit','global_daily_limit'],'admin.ai.test':['config'],'chat':['messages']
  }[input.action]||[];
  if(required.some(key=>p[key]===undefined))throw new ApiError('validation');
@@ -92,7 +92,7 @@ export function validateAction(input) {
  if(p.page!==undefined&&(!Number.isInteger(p.page)||p.page<0||p.page>1000))throw new ApiError('validation');
  for(const [key,max] of [['nickname',40],['title',120],['body',input.action==='comments.save'?3000:6000],['reason',1000]])if(p[key]!==undefined&&(typeof p[key]!=='string'||!p[key].trim()||p[key].length>max))throw new ApiError('validation');
  for(const [key,allowed] of [['category',['share','advice','progress']],['preference',['listen','advice']],['status',input.action==='admin.application.review'?['approved','rejected']:['active','muted','banned']],['role',['member','moderator']]])if(p[key]!==undefined&&!allowed.includes(p[key]))throw new ApiError('validation');
- if(input.action==='reports.create'&&Number(!!p.post_id)+Number(!!p.comment_id)!==1)throw new ApiError('validation');
+ if(['reports.create','appeals.create'].includes(input.action)&&Number(!!p.post_id)+Number(!!p.comment_id)!==1)throw new ApiError('validation');
  if(input.action==='admin.user'&&p.role===undefined&&p.status===undefined)throw new ApiError('validation');
  for(const [key,max] of [['user_daily_limit',1000],['global_daily_limit',100000]])if(p[key]!==undefined&&(!Number.isInteger(p[key])||p[key]<1||p[key]>max))throw new ApiError('validation');
  if(p.moderation_model!==undefined&&(typeof p.moderation_model!=='string'||p.moderation_model.length>160||/\s/.test(p.moderation_model)))throw new ApiError('validation');

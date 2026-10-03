@@ -15,6 +15,27 @@ const request=(body,aal='aal1',headers={})=>new Request('https://example.supabas
 const json=(value,status=200)=>Response.json(value,{status});
 function mockHandler(handle){const calls=[];return {calls,handler:createApiHandler({env,fetchImpl:async(url,options)=>{const c={url:String(url),...options};calls.push(c);if(c.url.endsWith('/auth/v1/user'))return json(user);return handle(c);}})};}
 
+test('post and reply appeals reach the authenticated RPC with exactly one target',async()=>{
+ for(const target of [{post_id:userId},{comment_id:userId}]){
+  const {handler}=mockHandler(call=>{
+   const body=JSON.parse(call.body);
+   assert.equal(body.actor,userId);
+   assert.equal(body.action,'appeals.create');
+   assert.deepEqual(body.payload,{...target,reason:'请复核这条内容'});
+   return json({ok:true,id:userId});
+  });
+  const response=await handler(request({action:'appeals.create',...target,reason:'请复核这条内容'}));
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).ok,true);
+ }
+ for(const target of [{},{post_id:userId,comment_id:userId},{comment_id:'invalid-id'}]){
+  const {handler,calls}=mockHandler(()=>{throw new Error('Invalid appeal must not reach database');});
+  const response=await handler(request({action:'appeals.create',...target,reason:'请复核这条内容'}));
+  assert.equal(response.status,400);
+  assert.equal(calls.length,1);
+ }
+});
+
 test('Supabase default key dictionaries and legacy environments both validate users before service RPC',async()=>{
  const modern={SUPABASE_PUBLISHABLE_KEYS:JSON.stringify({default:'sb_publishable_test'}),SUPABASE_SECRET_KEYS:JSON.stringify({default:'sb_secret_test'})};
  const cases=[
