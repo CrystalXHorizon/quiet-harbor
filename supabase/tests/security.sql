@@ -100,27 +100,46 @@ begin
  if exists(select 1 from public.qh_audit where reason like '%SECRET_CIPHERTEXT%' or reason like '%Approved body%') then raise exception 'sensitive audit data';end if;
 end $$;
 
--- Owner publishing uses the stored role, preserves drafts, and cannot edit another author.
-do $$ declare a uuid:='11111111-1111-4111-8111-111111111111'; b uuid:='22222222-2222-4222-8222-222222222222'; m uuid:='33333333-3333-4333-8333-333333333333';
- r jsonb; pid uuid; fields jsonb:='{"title":"Owner post","body":"Version one","category":"share","preference":"listen"}'; denied boolean;
+-- Every role uses AI review. Exact job identity prevents delayed decisions from publishing edits.
+do $$ declare a uuid:='11111111-1111-4111-8111-111111111111';m uuid:='33333333-3333-4333-8333-333333333333';
+ r jsonb;pid uuid;jid uuid;newjid uuid;cid uuid;fields jsonb:='{"title":"Owner post","body":"Version one","category":"share","preference":"listen","submit":true}';denied boolean;
 begin
- r:=public.qh_action(a,'posts.save',fields||'{"submit":false}');pid:=(r->>'id')::uuid;
- if (select status from public.qh_posts where id=pid)<>'draft' then raise exception 'owner draft published'; end if;
- perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'submit',true));
- if (select status from public.qh_posts where id=pid)<>'published' then raise exception 'owner post awaits review'; end if;
- perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Version two','submit',true));
- if (select body from public.qh_posts where id=pid)<>'Version two' then raise exception 'owner edit awaits review'; end if;
+ update public.qh_ai_settings set global_daily_limit=100;
+ r:=public.qh_action(a,'posts.save',fields);pid:=(r->>'id')::uuid;jid:=(r->>'moderation_job_id')::uuid;
+ if jid is null or (select status from public.qh_posts where id=pid)<>'pending' then raise exception 'owner bypassed AI review';end if;
+ perform public.qh_claim_moderation(a,jid);
+ r:=public.qh_complete_moderation(a,jid,'approve','通过','[]','v1','test');
+ if r->>'status'<>'published' then raise exception 'AI approval failed';end if;
+ r:=public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Revision'));jid:=(r->>'moderation_job_id')::uuid;
+ perform public.qh_claim_moderation(a,jid);
  perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Private draft','submit',false));
- if (select body from public.qh_posts where id=pid)<>'Version two' or (select revision_status from public.qh_posts where id=pid)<>'draft' then raise exception 'owner draft revision leaked'; end if;
- perform public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Final','submit',true));
- if (select pending_revision from public.qh_posts where id=pid) is not null then raise exception 'owner stale revision'; end if;
- denied:=false;begin perform public.qh_action(b,'posts.save',fields||jsonb_build_object('id',pid,'submit',true));exception when others then denied:=sqlerrm='not_found';end;
- if not denied then raise exception 'other author edited owner post'; end if;
- r:=public.qh_action(m,'posts.save',fields||'{"submit":true,"role":"owner"}');
- if (select status from public.qh_posts where id=(r->>'id')::uuid)<>'pending' then raise exception 'moderator bypassed review'; end if;
- r:=public.qh_action(b,'posts.save',fields||'{"submit":true,"role":"owner"}');
- if (select status from public.qh_posts where id=(r->>'id')::uuid)<>'pending' then raise exception 'member bypassed review'; end if;
- if not exists(select 1 from public.qh_audit where action='posts.owner_publish' and target_id=pid) then raise exception 'owner publication audit absent'; end if;
+ r:=public.qh_complete_moderation(a,jid,'approve','通过','[]','v1','test');
+ if (r->>'applied')::boolean or (select body from public.qh_posts where id=pid)<>'Version one' then raise exception 'stale AI result published draft';end if;
+ r:=public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Revision two'));jid:=(r->>'moderation_job_id')::uuid;
+ perform public.qh_claim_moderation(a,jid);
+ r:=public.qh_action(a,'posts.save',fields||jsonb_build_object('id',pid,'body','Revision three'));newjid:=(r->>'moderation_job_id')::uuid;
+ r:=public.qh_complete_moderation(a,jid,'approve','通过','[]','v1','test');
+ if (r->>'applied')::boolean then raise exception 'old version approved newer text';end if;
+ perform public.qh_claim_moderation(a,newjid);
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','post','id',pid,'decision','reject','reason','人工拒绝'),true);
+ r:=public.qh_complete_moderation(a,newjid,'approve','通过','[]','v1','test');
+ if (r->>'applied')::boolean or (select revision_status from public.qh_posts where id=pid)<>'rejected' then raise exception 'AI overrode human';end if;
+ perform public.qh_action(a,'admin.moderate',jsonb_build_object('kind','post','id',pid,'decision','approve','reason','站长复核放行'),true);
+ if (select body from public.qh_posts where id=pid)<>'Revision three' then raise exception 'owner review failed';end if;
+ r:=public.qh_action(a,'comments.save',jsonb_build_object('post_id',pid,'body','reply'));cid:=(r->>'id')::uuid;jid:=(r->>'moderation_job_id')::uuid;
+ perform public.qh_claim_moderation(a,jid);
+ perform public.qh_complete_moderation(a,jid,'reject','需修改','["3"]','v1','test');
+ perform public.qh_action(a,'appeals.create',jsonb_build_object('comment_id',cid,'reason','请求复核'));
+ if not exists(select 1 from public.qh_appeals where comment_id=cid) then raise exception 'comment appeal absent';end if;
+ r:=public.qh_action(a,'posts.save',fields);pid:=(r->>'id')::uuid;jid:=(r->>'moderation_job_id')::uuid;
+ update public.qh_ai_settings set enabled=false;
+ denied:=false;begin perform public.qh_claim_moderation(a,jid);exception when others then denied:=sqlerrm='not_configured';end;
+ if not denied or (select status from public.qh_moderation_jobs where id=jid)<>'queued' then raise exception 'disabled AI ran moderation';end if;
+ update public.qh_ai_settings set enabled=true;
+ perform public.qh_complete_moderation(a,jid,'error','审核暂不可用','[]','v1','test');
+ if (select status from public.qh_posts where id=pid)<>'pending' then raise exception 'error failed open';end if;
+ denied:=false;begin perform public.qh_claim_moderation(m,jid);exception when others then denied:=sqlerrm='not_found';end;
+ if not denied then raise exception 'other author claimed job';end if;
 end $$;
 
 -- Actual low-privilege execution: grants must fail, regardless of RLS policy defaults.
@@ -130,6 +149,10 @@ do $$ declare denied boolean; begin
  if not denied then raise exception 'authenticated read settings';end if;
  denied:=false;begin perform public.qh_action('11111111-1111-4111-8111-111111111111','admin.ai.get');exception when insufficient_privilege then denied:=true;end;
  if not denied then raise exception 'authenticated impersonated owner';end if;
+ denied:=false;begin perform public.qh_claim_moderation('11111111-1111-4111-8111-111111111111','11111111-1111-4111-8111-111111111111');exception when insufficient_privilege then denied:=true;end;
+ if not denied then raise exception 'authenticated claimed service job';end if;
+ denied:=false;begin perform * from public.qh_moderation_jobs;exception when insufficient_privilege then denied:=true;end;
+ if not denied then raise exception 'authenticated read private moderation context';end if;
 end $$;
 reset role;
 rollback;

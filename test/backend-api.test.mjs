@@ -197,3 +197,30 @@ test('pending applicant cannot cause quota reservation or provider calls',async(
  const res=await handler(request({action:'chat',messages:[{role:'user',content:'hello'}]}));
  assert.equal(res.status,403);assert.equal((await res.json()).code,'admission_required');assert.equal(calls.length,2);
 });
+
+test('submitted posts and comments run moderation server-side and fail closed, drafts skip provider',async()=>{
+ const encrypted_key=await encryptKey('moderation-private',master,config);
+ for(const scenario of ['approve','reject','invalid','unconfigured','draft']){
+  let completed,providerCalls=0;
+  const {handler}=mockHandler(c=>{
+   const body=JSON.parse(c.body);
+   if(c.url.endsWith('/rpc/qh_action'))return json({ok:true,id:userId,status:scenario==='draft'?'draft':'pending',...(scenario==='draft'?{}:{moderation_job_id:userId})});
+   if(c.url.endsWith('/rpc/qh_claim_moderation')){
+    assert.equal(body.actor,userId);assert.equal(body.job_id,userId);
+    return scenario==='unconfigured'?json({message:'not_configured'},400):json({id:userId,kind:'post',content:{title:'标题',body:'这是测试内容'},context:{},config,encrypted_key,moderation_model:'review-model'});
+   }
+   if(c.url.endsWith('/rpc/qh_complete_moderation')){completed=body;return json({ok:true,applied:true,status:body.decision==='approve'?'published':body.decision==='reject'?'rejected':'pending'});}
+   providerCalls++;assert.equal(JSON.parse(c.body).model,'review-model');assert.equal(c.headers.Authorization,'Bearer moderation-private');
+   const output=scenario==='approve'?{decision:'approve',reason:'OK',rule_ids:[],evidence:[]}:scenario==='reject'?{decision:'reject',reason:'bad',rule_ids:[3],evidence:['测试内容']}:{decision:'approve',reason:'bad',rule_ids:[99],evidence:[]};
+   return json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(output)}}]});
+  });
+  const response=await handler(request({action:'posts.save',title:'标题',body:'这是测试内容',category:'share',preference:'listen',submit:scenario!=='draft',moderation_job_id:'forged'}));
+  assert.equal(response.status,200);const result=await response.json();assert.ok(!JSON.stringify(result).includes('moderation-private'));
+  assert.equal(result.status,scenario==='approve'?'published':scenario==='reject'?'rejected':scenario==='draft'?'draft':'pending');
+  assert.equal(providerCalls,['draft','unconfigured'].includes(scenario)?0:1);
+  if(scenario!=='draft')assert.equal(completed.decision,['approve','reject'].includes(scenario)?scenario:'error');
+ }
+ const {handler,calls}=mockHandler(c=>c.url.endsWith('/rpc/qh_action')?json({ok:true,id:userId,moderation_job_id:userId,status:'pending'}):json({message:'not_configured'},400));
+ const response=await handler(request({action:'comments.save',post_id:userId,body:'评论'}));
+ assert.equal(response.status,200);assert.equal((await response.json()).status,'pending');assert.ok(calls.some(c=>c.url.endsWith('/rpc/qh_claim_moderation')));
+});

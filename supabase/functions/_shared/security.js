@@ -95,6 +95,7 @@ export function validateAction(input) {
  if(input.action==='reports.create'&&Number(!!p.post_id)+Number(!!p.comment_id)!==1)throw new ApiError('validation');
  if(input.action==='admin.user'&&p.role===undefined&&p.status===undefined)throw new ApiError('validation');
  for(const [key,max] of [['user_daily_limit',1000],['global_daily_limit',100000]])if(p[key]!==undefined&&(!Number.isInteger(p[key])||p[key]<1||p[key]>max))throw new ApiError('validation');
+ if(p.moderation_model!==undefined&&(typeof p.moderation_model!=='string'||p.moderation_model.length>160||/\s/.test(p.moderation_model)))throw new ApiError('validation');
  // Privileged values are exclusively manufactured server-side.
  delete p.encrypted_key;delete p.key_last4;delete p.actor;delete p.aal2;delete p.code_hash;delete p.code_hint;
  const admissionRequired={'admission.apply':['reason'],'admission.redeem':['code'],'admin.application.review':['id','status','reason'],'admin.invites.create':['label','max_uses'],'admin.invites.update':['id','enabled']}[input.action]||[];
