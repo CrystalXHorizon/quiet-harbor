@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 
 const target=resolve('dist');
 await mkdir(target,{recursive:true});
-const files=['index.html','style.css','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css'];
+const files=['index.html','community-rules.html','community-rules.css','style.css','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css'];
 for(const file of files)await copyFile(resolve('public',file),resolve(target,file));
 const config=JSON.parse(await readFile('public/site-config.json','utf8'));
 if(process.env.PUBLIC_SUPABASE_URL)config.supabaseUrl=process.env.PUBLIC_SUPABASE_URL;

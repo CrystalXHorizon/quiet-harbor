@@ -1,6 +1,7 @@
 import {runHarness,validateMessages,verifyKey} from './harness.js';
 import {providerEnv} from './providers.js';
 import {resolveSupabaseKeys} from './supabase-keys.js';
+import {runModeration,POLICY_VERSION} from './moderation.js';
 import {generateInviteCode,hashInviteCode} from './security.js';
 import {ApiError,errorResponse,rpcError,allowedOrigins,safeProviderConfig,validateKey,encryptKey,decryptKey,readJson,verifiedAal2,validateAction} from './security.js';
 
@@ -73,7 +74,7 @@ export function createApiHandler({env,fetchImpl=fetch}) {
      result={ok:true};
     }else{
      if(payload.enabled&&!key)throw new ApiError('key_required');
-     const securePayload={config,enabled:payload.enabled,user_daily_limit:payload.user_daily_limit,global_daily_limit:payload.global_daily_limit};
+     const securePayload={config,enabled:payload.enabled,user_daily_limit:payload.user_daily_limit,global_daily_limit:payload.global_daily_limit,moderation_model:payload.moderation_model};
      if(key){securePayload.encrypted_key=await encryptKey(key,env.AI_ENCRYPTION_KEY,config);securePayload.key_last4=key.slice(-4);}
      result=await rpc('admin.ai.save',securePayload);
     }
@@ -87,6 +88,22 @@ export function createApiHandler({env,fetchImpl=fetch}) {
     result=await rpc(input.action,{code_hash:await hashInviteCode(payload.code)});
     if(result.error_code==='invite_invalid')throw new ApiError('invite_invalid');
    }else result=await rpc(input.action,payload);
+   if(['posts.save','comments.save'].includes(input.action)&&result?.moderation_job_id){
+    const job_id=result.moderation_job_id;
+    let outcome={decision:'error',reason:'自动审核暂时未完成，已保留待人工审核。',rule_ids:[],policy_version:POLICY_VERSION};
+    let model='';
+    try{
+     const job=await internalFetch('/rest/v1/rpc/qh_claim_moderation',{actor:user.id,job_id});
+     const config=safeProviderConfig(job.config,env.AI_ALLOWED_HOSTS);
+     const key=await decryptKey(job.encrypted_key,env.AI_ENCRYPTION_KEY,config);
+     model=job.moderation_model||config.model;
+     outcome=await runModeration(job,{...providerEnv(config,key),AI_MODEL:model},{fetchImpl,signal:request.signal});
+    }catch{/* A saved submission must never become published when moderation fails. */}
+    try{
+     const completed=await internalFetch('/rest/v1/rpc/qh_complete_moderation',{actor:user.id,job_id,...outcome,model});
+     result={...result,...completed,moderation:outcome.decision};
+    }catch{result={...result,moderation:'pending'};}
+   }
    return new Response(JSON.stringify(result),{status:200,headers});
   }catch(error){const response=errorResponse(error);return new Response(JSON.stringify(response.body),{status:response.status,headers});}
  };
