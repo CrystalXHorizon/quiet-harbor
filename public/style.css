@@ -18,6 +18,7 @@
 #auth-dialog .auth-mfa{border-top:1px solid var(--line);margin-top:22px;padding-top:16px}#auth-dialog .auth-form+ .auth-form{border-top:1px solid var(--line);margin-top:22px;padding-top:20px}#auth-dialog .auth-form textarea{width:100%;resize:vertical;min-height:90px;border:1px solid #c4d1d7;border-radius:8px;padding:12px;color:var(--ink);background:white}#auth-dialog small{display:block;color:var(--muted);font-size:12px;line-height:1.7}.qh-invite-result{margin:24px 0;padding:20px;border:1px solid #b7ccd3;background:#edf4f4;border-radius:12px}.qh-invite-result input{width:100%;padding:12px;border:1px solid #c4d1d7;border-radius:8px;background:white;font-family:monospace}.qh-invite-result button{margin-top:12px}
 
 /* Audit: visible focus, readable secondary copy and persistent mobile navigation. */
+.auth-tabs button.primary{background:var(--ink);color:white}#auth-dialog .auth-tabs button{min-height:44px}
 .overline,.side-bottom p,.subtle,.nav-tail,.bubble .speaker,.disclaimer,.composer-bottom>span,.composer textarea::placeholder{color:#526770}.side-note p{font-size:20px}
 button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #8b4429;outline-offset:3px;box-shadow:0 0 0 2px white}
 dialog .close{width:44px;height:44px}

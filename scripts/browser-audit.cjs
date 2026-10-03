@@ -35,6 +35,17 @@ async function fixture(browser,{owner=false,slow=false,chatStatus=200}={}){
 }
 async function main(){const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});try{
  const headers=await fetch(base).then(r=>r.headers);assert.match(headers.get('content-security-policy'),/frame-ancestors 'none'/);assert.equal(headers.get('x-frame-options'),'DENY');
+ const contrast=await fixture(browser);await contrast.page.goto(base);await contrast.page.locator('#account-open').click();
+ for(const name of ['登录','申请加入']){
+  const tab=contrast.page.locator('.auth-tabs').getByRole('button',{name,exact:true});await tab.click();
+  const ratio=await tab.evaluate(el=>{
+   const style=getComputedStyle(el),luminance=color=>{const rgb=color.match(/[\d.]+/g).slice(0,3).map(x=>Number(x)/255).map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};
+   const a=luminance(style.color),b=luminance(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+  });
+  assert.ok(ratio>=4.5,`${name} selected-tab contrast ${ratio.toFixed(2)} is below 4.5`);
+  assert.ok(await tab.evaluate(el=>el.getBoundingClientRect().height>=44));
+ }
+ assert.deepEqual(contrast.errors,[]);await contrast.context.close();
  const rejected=await fixture(browser);await rejected.page.goto(base+'/#access_token=attacker&refresh_token=attacker&type=invite');await rejected.page.locator('#auth-dialog').waitFor({state:'visible'});assert.equal(await rejected.page.getByLabel('新密码',{exact:true}).count(),0);assert.equal(rejected.verifies,0);assert.equal(rejected.calls.length,0);assert.equal(await rejected.page.evaluate(()=>location.hash),'');assert.deepEqual(rejected.errors,[]);await rejected.context.close();
  for(const type of ['invite','recovery']){
   const fragment=await fixture(browser);
@@ -52,6 +63,6 @@ async function main(){const browser=await chromium.launch({headless:true,...(pro
  const invalid=await fixture(browser);await invalid.signIn();await invalid.page.locator('#message').fill('响应为 null');await invalid.page.locator('#send').click();await invalid.page.getByText('连接暂时不可用，请稍后重试。',{exact:true}).waitFor();assert.deepEqual(invalid.errors,[]);await invalid.context.close();
  const paging=await fixture(browser,{owner:true});await paging.signIn();await paging.page.locator('#admin-nav').click();for(const name of ['用户管理','操作记录']){await paging.page.getByRole('button',{name,exact:true}).click();await paging.page.getByRole('button',{name:'下一页',exact:true}).click();await paging.page.getByRole('button',{name:'上一页',exact:true}).waitFor();assert.equal(await paging.page.getByRole('button',{name:'下一页',exact:true}).count(),0);}assert.ok(paging.calls.some(x=>x.action==='admin.users'&&x.page===1));assert.ok(paging.calls.some(x=>x.action==='admin.audit'&&x.page===1));assert.deepEqual(paging.errors,[]);await paging.context.close();
  const mobile=await fixture(browser);await mobile.page.goto(base);await mobile.page.locator('#message').fill('我想伤害自己');await mobile.page.locator('#send').click();await mobile.page.locator('#help-dialog').waitFor({state:'visible'});assert.equal(await mobile.page.evaluate(()=>document.activeElement.id),'help-title');await mobile.page.getByRole('dialog').getByRole('button',{name:'我知道了'}).click();assert.ok(await mobile.page.locator('#clear').evaluate(el=>el.getBoundingClientRect().height>=44));await mobile.page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));assert.equal(await mobile.page.locator('.sidebar').evaluate(el=>Math.round(el.getBoundingClientRect().top)),0);assert.ok(await mobile.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await fs.mkdir('test-results/browser',{recursive:true});await mobile.page.evaluate(()=>window.scrollTo(0,0));await mobile.page.screenshot({path:'test-results/browser/audit-mobile.png',fullPage:true});assert.deepEqual(mobile.errors,[]);await mobile.context.close();
- console.log('Audit browser checks passed: token rejection/confirmation/PKCE, pending profile, expired session, invalid JSON shape, admin pagination, mobile target/focus/sticky navigation and real CSP headers');
+ console.log('Audit browser checks passed: selected auth-tab contrast, token rejection/confirmation/PKCE, pending profile, expired session, invalid JSON shape, admin pagination, mobile target/focus/sticky navigation and real CSP headers');
  }finally{await browser.close();}}
 main().catch(e=>{console.error(e);process.exitCode=1;});
