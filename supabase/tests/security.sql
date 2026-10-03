@@ -210,7 +210,7 @@ begin
 end $$;
 
 do $$ declare a uuid:='11111111-1111-4111-8111-111111111111';x uuid:='55555555-5555-4555-8555-555555555555';y uuid:='66666666-6666-4666-8666-666666666666';z uuid:='77777777-7777-4777-8777-777777777777';
- p uuid;q uuid;c uuid;j uuid;r jsonb;tab record;found_text boolean;denied boolean;
+ p uuid;q uuid;c uuid;j uuid;r jsonb;usage_snapshot jsonb;tab record;found_text boolean;denied boolean;
  fields jsonb:='{"title":"Erasure test","body":"ERASE-ME-UNIQUE-801","category":"share","preference":"listen","submit":true}';
 begin
  -- Dedicated disposable identities avoid modifying the earlier fixtures.
@@ -254,7 +254,11 @@ begin
  -- The full author history must allow actual Auth deletion, including attribution.
  r:=public.qh_action(x,'posts.save',fields||jsonb_build_object('body','Account erasure text'));p:=(r->>'id')::uuid;
  insert into public.qh_invites(code_hash,code_hint,label,max_uses,created_by) values(repeat('f',64),'FFFF','author fixture',1,x);
+ perform public.qh_reserve_ai(x);perform public.qh_record_ai_call(x,'chat',true);
+ usage_snapshot:=public.qh_action(a,'admin.usage','{}',true);
  delete from auth.users where id=x;
+ r:=public.qh_action(a,'admin.usage','{}',true);
+ if r->'provider_calls'<>usage_snapshot->'provider_calls' or r->'chat_turns'<>usage_snapshot->'chat_turns' then raise exception 'account erasure reset anonymous site usage totals';end if;
  if exists(select 1 from public.qh_profiles where id=x) or exists(select 1 from public.qh_posts where author_id=x) or exists(select 1 from public.qh_moderation_jobs where author_id=x) then raise exception 'Auth deletion left owned data';end if;
  if not exists(select 1 from public.qh_invites where code_hint='FFFF' and created_by is null) then raise exception 'attribution should be nullable';end if;
  perform public.qh_action(a,'admin.purge',jsonb_build_object('id',z,'reason','confirmed request'),true);

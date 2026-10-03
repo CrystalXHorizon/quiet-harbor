@@ -49,6 +49,6 @@ test('real SQL RPC output feeds the Edge gateway: me, settings, reservations, cl
   assert.ok(changed.renamed_config);assert.equal(changed.config,undefined);assert.throws(()=>moderationConnection(changed,''));
   const settings=await handler(request({action:'admin.ai.get'}));assert.equal(settings.status,200);assert.equal((await settings.json()).key_set,true);
   const reserved=await rpc('qh_reserve_ai',{actor:id});assert.deepEqual(reserved.config,config);assert.deepEqual(reserved.encrypted_key,ciphertext);
-  const health=await handler(new Request('https://contract.supabase.co/functions/v1/api/health',{headers:{Origin:'https://site.example'}}));assert.equal(health.status,200);assert.equal((await health.json()).schema,'202610030004');
+  const health=await handler(new Request('https://contract.supabase.co/functions/v1/api/health',{headers:{Origin:'https://site.example'}}));assert.equal(health.status,200);assert.equal((await health.json()).schema,'202610030005');
  }finally{await db.close();}
 });
