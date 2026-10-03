@@ -47,7 +47,10 @@ async function sendMessage() {
   const text = $('message').value.trim(); if (!text || pending) return;
   if(session()?.mfaRequired&&quickRoute(text)!=='crisis'){openAccount();return;}
   $('message').value = ''; addMessage('user', text); history.push({ role:'user', content:text }); trimHistory();
-  if (quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); return; }
+  const localOnly = Boolean(session()?.mfaRequired) || !session()?.profile || (session().profile.status!=='banned'&&session().profile.admission_status!=='approved');
+  // A word filter cannot tell a film plot from a disclosure, so the local crisis text is only
+  // the offline net. While the backend is reachable it decides the route — it sees the context.
+  if (localOnly && quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); return; }
   if (!session()?.profile || (session().profile.status!=='banned'&&session().profile.admission_status!=='approved')) { const reply = demoReply(text, history.filter(m => m.role === 'user').length - 1); addMessage('assistant', reply.text, '留岸 · 本地预设回复'); history.push({ role:'assistant', content:reply.text }); trimHistory(); $('status').textContent = '这是本地预设回复。登录并通过加入申请，或使用邀请码后，可使用站点 AI。'; return; }
   const requestId = ++generation; const controller = new AbortController(); pending = controller; setBusy(true);
   $('status').textContent = '正在倾听，并检查回答是否合适……';
@@ -58,10 +61,10 @@ async function sendMessage() {
     if (generation !== requestId) return;
     addMessage(data.route === 'crisis' ? 'notice' : 'assistant', data.text, data.mode === 'ai' ? '留岸 · AI' : '留岸 · 保护提示');
     history.push({role:'assistant',content:data.text}); trimHistory();
-    $('status').textContent = data.mode === 'ai' ? '回复已完成检查。检查仍可能遗漏问题，请以专业支持为准。' : '已切换为预设支持提示。';
+    $('status').textContent = data.mode === 'ai' ? '回复已完成检查。检查仍可能遗漏问题，请以专业支持为准。' : '这是一条安全提示，不是普通回复。';
     if (data.route === 'crisis') openDialog('help-dialog');
     if (Date.now() - started > 20*60*1000) { $('status').textContent += ' 已聊了一会儿，你可以休息一下。'; started = Date.now(); }
-  } catch (error) { if (generation === requestId) { $('status').textContent = controller.signal.aborted ? '请求已停止或超时。你可以稍后重试。' : error.message; addMessage('notice', '这次没能完成回复。你刚才的话仍在页面里；可以稍后再试，或先停一会儿。', '连接提示'); } }
+  } catch (error) { if (generation === requestId) { if (quickRoute(text) === 'crisis') { addMessage('notice', CRISIS_TEXT, '留岸 · 现实支持提示'); history.push({role:'assistant',content:CRISIS_TEXT}); trimHistory(); openDialog('help-dialog'); } else { $('status').textContent = controller.signal.aborted ? '请求已停止或超时。你可以稍后重试。' : error.message; addMessage('notice', '这次没能完成回复。你刚才的话仍在页面里；可以稍后再试，或先停一会儿。', '连接提示'); } } }
   finally { clearTimeout(timeout); if (generation === requestId) { pending = null; setBusy(false); $('message').focus(); } }
 }
 $('chat-form').addEventListener('submit', e => {e.preventDefault(); void sendMessage();});
