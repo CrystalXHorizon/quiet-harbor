@@ -62,14 +62,65 @@ export function initCommunity({api,onRequireAuth,getSession,onAccountRefresh}){
  function compose(post,afterChange){const d=modal(post?'编辑帖子':'写一篇帖子');const form=node('form');const title=field('标题','text',post?.title||'',{required:true,maxLength:120});const category=field('分类','select',post?.category||'share',{choices:CATEGORIES});const preference=field('你希望收到怎样的回应？','select',post?.preference||'listen',{choices:{listen:'只想被听见',advice:'欢迎建议'}});const body=field('想说的话','textarea',post?.body||'',{required:true,maxLength:6000,hint:'不要填写真实姓名、电话号码等私人信息。你可以先保存草稿。'});body.input.rows=9;const message=notice();const save=button('保存草稿',()=>savePost(false));const submit=node('button','提交并审核','qh-button primary');submit.type='submit';form.append(title.wrap,actions(category.wrap,preference.wrap),body.wrap,node('p',post?.status==='published'?'修改后重新审核；通过前继续展示原已发布版本。保存草稿不会公开修改。':'审核通过后才会展示给其他成员；保存草稿不会提交审核。','qh-muted'),reviewNotice(),message,actions(save,submit));d.append(form);form.addEventListener('submit',event=>{event.preventDefault();savePost(true);});
   function savePost(publish){if(!form.reportValidity())return;save.disabled=submit.disabled=true;perform(null,message,()=>api('posts.save',{id:post?.id,title:title.input.value.trim(),body:body.input.value.trim(),category:category.input.value,preference:preference.input.value,submit:publish}),async result=>{d.close();if(afterChange){await afterChange();return;}if(view==='admin'){loadAdmin();return;}filter.scope='mine';buildCommunity();await loadFeed();setMessage(feedMessage,publish?reviewResult(result,'帖子'):'草稿已保存。');}).finally(()=>{save.disabled=submit.disabled=false;});}
  }
- async function openPost(id,afterChange){const d=modal('帖子与回应');if(afterChange)d.addEventListener('close',afterChange,{once:true});const content=node('div');d.append(content);const current=epoch;content.append(notice('正在加载…'));try{const data=await api('posts.get',{id});if(current!==epoch||!d.open)return;renderPost(d,content,data,afterChange);}catch(error){if(current===epoch&&d.open)loadError(content,error,()=>{d.close();openPost(id,afterChange);});}}
- function renderPost(d,content,data,afterChange){content.replaceChildren();const post=data.post;post.bookmarked=!!data.bookmarked;content.append(node('h3',post.title,'qh-detail-title'),authorLine(post),node('p',`${CATEGORIES[post.category]||'想说说'} · ${post.preference==='advice'?'欢迎建议':'只想被听见，请先倾听，避免直接给建议。'}`,'qh-preference'),node('div',post.body,'qh-post-body'));
-  if((own(post)||isStaff())&&post.reason)content.append(node('p',`处理说明：${post.reason}`,'qh-review-reason'));const message=notice();const row=actions();if(post.status==='published'){const bookmark=button(post.bookmarked?'取消收藏':'收藏帖子',()=>perform(bookmark,message,()=>api('bookmarks.toggle',{post_id:post.id}),result=>{post.bookmarked=!!result.active;bookmark.textContent=post.bookmarked?'取消收藏':'收藏帖子';if(filter.scope==='bookmarked')loadFeed();}));row.append(bookmark);}
-  if(own(post)){row.append(button('编辑帖子',()=>{d.close();compose(post,afterChange);}));const toggle=button(post.comments_open?'关闭评论':'开放评论',()=>perform(toggle,message,()=>api('posts.comments',{id:post.id,open:!post.comments_open}),()=>{d.close();openPost(post.id,afterChange);}));row.append(toggle,button('删除帖子',()=>confirmDelete(post,d),'danger'));}
-  else{row.append(button('举报',()=>reasonDialog('举报这篇帖子','请说明需要管理员关注的内容。','reports.create',{post_id:post.id},'举报已提交。'),'text'),button('屏蔽此用户',()=>reasonDialog('屏蔽此用户','屏蔽后不再显示对方的帖子和评论。你随时可以在屏蔽管理中取消。','blocks.toggle',{user_id:post.author_id},'已更新屏蔽设置。',false,()=>{d.close();loadFeed();}),'text'));}
-  if(isStaff()&&(!own(post)||isOwner()))row.append(button('管理此帖',()=>moderateDialog('post',post,()=>{d.close();openPost(post.id,afterChange);}),'text'));
-  content.append(row,message);const comments=node('section',null,'qh-comments');comments.append(node('h3','回应'));const items=data.comments||[];if(!items.length)comments.append(node('p','还没有已展示的回应。','qh-muted'));for(const comment of items){const entry=node('article',null,'qh-comment');entry.append(authorLine(comment),node('p',comment.body,'qh-post-body'));if(comment.status&&comment.status!=='published')entry.append(statusBadge(comment));if((own(comment)||isStaff())&&comment.reason)entry.append(node('p',`处理说明：${comment.reason}`,'qh-review-reason'));if(!own(comment))entry.append(button('举报回应',()=>reasonDialog('举报这条回应','请说明需要管理员关注的内容。','reports.create',{comment_id:comment.id},'举报已提交。'),'text'));else entry.append(button('删除回应',()=>reasonDialog('删除这条回应？','删除后会从社区移除，这一步不能在页面中撤销。','comments.delete',{id:comment.id},'回应已删除。',false,()=>entry.remove()),'text'));if(own(comment)&&['rejected','hidden'].includes(comment.status))entry.append(button('申诉',()=>reasonDialog('回应申诉','请说明希望复核的原因。','appeals.create',{comment_id:comment.id},'申诉已提交，等待人工复核。'),'text'));if(isStaff()&&(!own(comment)||isOwner()))entry.append(button('管理回应',()=>moderateDialog('comment',comment,()=>{d.close();openPost(post.id,afterChange);}),'text'));comments.append(entry);}content.append(comments);
-  if(post.comments_open&&post.status==='published'){const form=node('form');const reply=field(post.preference==='listen'?'留一句你愿意说的安慰':'写下回应','textarea','',{required:true,maxLength:3000});reply.input.rows=4;const send=node('button','提交并审核','qh-button primary');send.type='submit';const result=notice();form.append(reply.wrap,node('p','回应经审核后展示。请尊重对方选择的回应方式。','qh-muted'),reviewNotice(),result,actions(send));form.addEventListener('submit',event=>{event.preventDefault();if(!form.reportValidity())return;perform(send,result,()=>api('comments.save',{post_id:post.id,body:reply.input.value.trim()}),saved=>{reply.input.value='';setMessage(result,reviewResult(saved,'回应'));result.append(button('刷新回应',()=>{d.close();openPost(post.id,afterChange);},'text'));});});content.append(form);}else content.append(node('p',post.comments_open?'帖子发布后可以回应。':'作者暂时关闭了评论。','qh-muted'));
+ async function openPost(id,afterChange){
+  const d=modal('帖子与回应');d.classList.add('qh-post-dialog');d.querySelector(':scope > h2').textContent='互助社区';
+  if(afterChange)d.addEventListener('close',afterChange,{once:true});
+  const content=node('div',null,'qh-post-content');d.append(content);const current=epoch;
+  const loading=notice('正在加载帖子…');loading.classList.add('qh-post-loading');content.append(loading);
+  try{const data=await api('posts.get',{id});if(current!==epoch||!d.open)return;renderPost(d,content,data,afterChange);}
+  catch(error){if(current===epoch&&d.open)loadError(content,error,()=>{d.close();openPost(id,afterChange);});}
+ }
+ function detailAuthor(item){
+  const line=node('div',null,'qh-detail-author');const avatar=node('span',Array.from(item.nickname||'社区成员')[0],'qh-author-mark');avatar.setAttribute('aria-hidden','true');
+  line.append(avatar,authorLine(item));return line;
+ }
+ function emptyComments(){const empty=node('div',null,'qh-comments-empty');empty.append(node('p','还没有已展示的回应。'),node('span','回应通过审核后会显示在这里。'));return empty;}
+ function renderPost(d,content,data,afterChange){
+  content.replaceChildren();const post=data.post;post.bookmarked=!!data.bookmarked;
+  const story=node('article',null,'qh-story'),header=node('header',null,'qh-story-heading'),tags=node('div',null,'qh-story-tags');
+  tags.append(node('span',CATEGORIES[post.category]||'想说说','qh-badge soft'));if(own(post)||isStaff())tags.append(statusBadge(post));
+  header.append(tags,node('h3',post.title,'qh-detail-title'),detailAuthor(post));
+  const preference=node('aside',null,'qh-response-preference');preference.append(node('span','回应方式','qh-preference-label'),node('strong',post.preference==='advice'?'欢迎建议':'只想被听见'),node('p',post.preference==='advice'?'可以分享你的想法，留给对方自己选择。':'请先倾听，避免直接给建议。'));
+  story.append(header,preference,node('div',post.body,'qh-post-body'));
+  if((own(post)||isStaff())&&post.reason)story.append(node('p',`处理说明：${post.reason}`,'qh-review-reason'));
+  const message=notice(),toolbar=node('div',null,'qh-post-toolbar'),row=actions();
+  if(post.status==='published'){
+   const bookmark=button(post.bookmarked?'取消收藏':'收藏帖子',()=>perform(bookmark,message,()=>api('bookmarks.toggle',{post_id:post.id}),result=>{post.bookmarked=!!result.active;bookmark.textContent=post.bookmarked?'取消收藏':'收藏帖子';bookmark.setAttribute('aria-pressed',String(post.bookmarked));if(filter.scope==='bookmarked')loadFeed();}));
+   bookmark.setAttribute('aria-pressed',String(post.bookmarked));row.append(bookmark);
+  }
+  if(own(post)){
+   row.append(button('编辑帖子',()=>{d.close();compose(post,afterChange);}));
+   const toggle=button(post.comments_open?'关闭评论':'开放评论',()=>perform(toggle,message,()=>api('posts.comments',{id:post.id,open:!post.comments_open}),()=>{d.close();openPost(post.id,afterChange);}));row.append(toggle);
+  }
+  const more=node('details',null,'qh-post-options'),menu=node('div',null,'qh-post-options-menu');more.append(node('summary','更多操作'),menu);
+  if(own(post))menu.append(button('删除帖子',()=>confirmDelete(post,d),'danger'));
+  else menu.append(button('举报',()=>reasonDialog('举报这篇帖子','请说明需要管理员关注的内容。','reports.create',{post_id:post.id},'举报已提交。'),'text'),button('屏蔽此用户',()=>reasonDialog('屏蔽此用户','屏蔽后不再显示对方的帖子和评论。你随时可以在屏蔽管理中取消。','blocks.toggle',{user_id:post.author_id},'已更新屏蔽设置。',false,()=>{d.close();loadFeed();}),'text'));
+  if(isStaff()&&(!own(post)||isOwner()))menu.append(button('管理此帖',()=>moderateDialog('post',post,()=>{d.close();openPost(post.id,afterChange);}),'text'));
+  menu.addEventListener('click',event=>{if(event.target.closest('button'))more.open=false;});
+  content.addEventListener('click',event=>{if(more.open&&!more.contains(event.target))more.open=false;});
+  more.addEventListener('keydown',event=>{if(event.key==='Escape'&&more.open){event.preventDefault();more.open=false;more.querySelector('summary').focus();}});
+  if(row.children.length)toolbar.append(row);toolbar.append(more);story.append(toolbar,message);content.append(story);
+
+  const comments=node('section',null,'qh-comments'),commentsHeading=node('header',null,'qh-comments-heading'),count=node('span','0','qh-comments-count');count.setAttribute('aria-label','当前可见的回应数量');commentsHeading.append(node('h3','回应'),count);comments.append(commentsHeading);
+  const items=data.comments||[];count.textContent=String(items.length);if(!items.length)comments.append(emptyComments());
+  for(const comment of items){
+   const entry=node('article',null,'qh-comment');entry.append(detailAuthor(comment),node('p',comment.body,'qh-post-body'));
+   if(comment.status&&comment.status!=='published')entry.append(statusBadge(comment));
+   if((own(comment)||isStaff())&&comment.reason)entry.append(node('p',`处理说明：${comment.reason}`,'qh-review-reason'));
+   const commentActions=actions();
+   if(!own(comment))commentActions.append(button('举报回应',()=>reasonDialog('举报这条回应','请说明需要管理员关注的内容。','reports.create',{comment_id:comment.id},'举报已提交。'),'text'));
+   else commentActions.append(button('删除回应',()=>reasonDialog('删除这条回应？','删除后会从社区移除，这一步不能在页面中撤销。','comments.delete',{id:comment.id},'回应已删除。',false,()=>{entry.remove();const remaining=comments.querySelectorAll('.qh-comment').length;count.textContent=String(remaining);if(!remaining)comments.append(emptyComments());}),'text'));
+   if(own(comment)&&['rejected','hidden'].includes(comment.status))commentActions.append(button('申诉',()=>reasonDialog('回应申诉','请说明希望复核的原因。','appeals.create',{comment_id:comment.id},'申诉已提交，等待人工复核。'),'text'));
+   if(isStaff()&&(!own(comment)||isOwner()))commentActions.append(button('管理回应',()=>moderateDialog('comment',comment,()=>{d.close();openPost(post.id,afterChange);}),'text'));
+   entry.append(commentActions);comments.append(entry);
+  }
+  content.append(comments);
+  if(post.comments_open&&post.status==='published'){
+   const form=node('form',null,'qh-reply-form'),reply=field(post.preference==='listen'?'留一句你愿意说的安慰':'写下回应','textarea','',{required:true,maxLength:3000});reply.input.rows=3;reply.input.placeholder='按照你自己的方式说，简短一点也可以。';
+   const send=node('button','提交并审核','qh-button primary');send.type='submit';const result=notice(),policy=node('details',null,'qh-reply-policy');policy.append(node('summary','审核与隐私说明'),reviewNotice());
+   form.append(reply.wrap,node('p','回应经 AI 审核后展示。请尊重对方选择的回应方式。','qh-muted'),policy,result,actions(send));
+   form.addEventListener('submit',event=>{event.preventDefault();if(!form.reportValidity())return;perform(send,result,()=>api('comments.save',{post_id:post.id,body:reply.input.value.trim()}),saved=>{reply.input.value='';setMessage(result,reviewResult(saved,'回应'));result.append(button('刷新回应',()=>{d.close();openPost(post.id,afterChange);},'text'));});});content.append(form);
+  }else content.append(node('p',post.comments_open?'帖子发布后可以回应。':'作者暂时关闭了评论。','qh-muted qh-replies-closed'));
  }
  function confirmDelete(post,parent){const d=modal('删除这篇帖子？');d.append(node('p','删除后会从社区移除。这一步不能在页面中撤销。'));const message=notice();const submit=button('确认删除',()=>perform(submit,message,()=>api('posts.delete',{id:post.id}),()=>{d.close();parent.close();loadFeed();}),'danger');d.append(message,actions(button('保留帖子',()=>d.close()),submit));}
  function moderateDialog(kind,item,after){const d=modal(kind==='post'?'管理这篇帖子':'管理这条回应');d.append(node('p','请依据当前内容处理。恢复发布前，确认内容已符合社区约定。'));const form=node('form');const decision=field('处理结果','select',item.status==='published'?'hide':'approve',{choices:{approve:'通过 / 恢复发布',reject:'退回修改',hide:'下架'}});const reason=field('处理说明','textarea','',{required:true,maxLength:1000});const message=notice();const submit=node('button','确认处理','qh-button primary');submit.type='submit';form.append(decision.wrap,reason.wrap,message,actions(submit));form.addEventListener('submit',event=>{event.preventDefault();if(!form.reportValidity())return;perform(submit,message,()=>api('admin.moderate',{kind,id:item.id,decision:decision.input.value,reason:reason.input.value.trim()}),()=>{d.close();after();});});d.append(form);}
