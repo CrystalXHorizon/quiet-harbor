@@ -22,6 +22,7 @@ export function createApiHandler({env,fetchImpl=fetch}) {
   // Opaque secret keys authenticate through apikey; only JWTs use Bearer.
   if(!service||!key.startsWith('sb_secret_'))headers.Authorization=`Bearer ${service?key:token}`;
   let response;try{response=await fetchImpl(env.SUPABASE_URL.replace(/\/$/,'')+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new ApiError('internal',503);}
+  if(response.status===204)return null;
   let data;try{data=await response.json();}catch{throw new ApiError('internal',503);}
   if(!response.ok){if(!service)throw new ApiError('unauthorized',401);throw rpcError(data);}
   return data;

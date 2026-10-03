@@ -45,8 +45,9 @@ export async function initAuth({ onChange = () => {} } = {}) {
   if (navigation.reset) mode = 'reset';
   let invitation = navigation.invitation;
   let emailLink = navigation.emailLink;
+  let fragmentLink = navigation.fragmentLink;
   // Remove token fragments before constructing Auth. The SDK must never consume them.
-  if (navigation.rejected || emailLink) history.replaceState(null, '', landingUrl());
+  if (navigation.rejected || emailLink || fragmentLink) history.replaceState(null, '', landingUrl());
   let content, status;
   function open() { render(); if (!dialog.open) dialog.showModal(); }
   function message(text) { status.textContent = text; }
@@ -95,12 +96,18 @@ export async function initAuth({ onChange = () => {} } = {}) {
       return;
     }
     const session = backend.getSession();
-    if (session?.mfaRequired) { title.textContent = '完成二次验证'; renderAccount(session); return; }
-    if (emailLink) {
+    if (emailLink || fragmentLink) {
       title.textContent = '确认邮件链接';
-      content.append(element('p', '只有你刚刚申请了这封邮件，且确认它来自留岸时，才继续。继续后会切换到邮件对应的账户。'), button('确认使用邮件链接', () => run(() => backend.client.auth.verifyOtp({ token_hash: emailLink.tokenHash, type: emailLink.type }), async () => { recovery = emailLink.type === 'recovery'; emailLink = null; invitation = false; await backend.refresh(); render(); message('邮箱已验证。请确认这里显示的是你的邮箱。'); })), button('取消', () => { emailLink = null; recovery = false; invitation = false; render(); }));
+      content.append(element('p', '只有你刚刚申请了这封邮件，且确认它来自留岸时，才继续。继续后会切换到邮件对应的账户。'), button('确认使用邮件链接', () => {
+        const link=emailLink||fragmentLink;
+        return run(() => emailLink
+          ? backend.client.auth.verifyOtp({ token_hash: link.tokenHash, type: link.type })
+          : backend.client.auth.setSession({ access_token: link.accessToken, refresh_token: link.refreshToken }),
+          async () => { recovery = link.type === 'recovery'; emailLink = null; fragmentLink = null; invitation = false; await backend.refresh(); render(); message('邮件链接已确认。请核对这里显示的是你的邮箱。'); });
+      }), button('取消', () => { emailLink = null; fragmentLink = null; recovery = false; invitation = false; render(); }));
       return;
     }
+    if (session?.mfaRequired) { title.textContent = '完成二次验证'; renderAccount(session); return; }
     if (recovery && session?.user) { title.textContent = '设置新密码'; renderPassword(); return; }
     if (session?.user) { renderAccount(session); return; }
     if (mode === 'reset' || recovery || invitation) {
@@ -255,7 +262,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
   };
   if (config) {
     backend = createBackendClient(config, {
-      createClient, detectSessionInUrl: !navigation.rejected && !navigation.emailLink,
+      createClient, detectSessionInUrl: !navigation.rejected && !navigation.emailLink && !navigation.fragmentLink,
       onChange: session => {
         onChange(session);
         // Do not replace a form while the user is typing or completing a request.

@@ -155,13 +155,13 @@ GitHub 的 MIT / CC BY-SA 授权只覆盖项目自身材料。用户帖子不自
 
 ## 邮件链接升级
 
-浏览器拒绝包含 access_token/refresh_token 的隐式片段。站内发起的邮箱验证和密码恢复使用 PKCE，应在发起请求的浏览器里打开邮件。邀请与跨浏览器恢复可在 Supabase 邮件模板使用如下链接（type 按模板改为 invite / recovery / signup / magiclink）：
+浏览器在初始化 Auth 前清除 access_token/refresh_token 片段；有效默认邮件令牌先显示确认页面，用户主动确认后才交给 SDK 验证和建立会话。无效片段直接拒绝。PKCE 回调需要本浏览器自己的验证器。明确选择自定义正文时，可以使用下面的 token_hash 链接（type 按模板改为 invite / recovery / email / magiclink）：
 
 `{{ .SiteURL }}?token_hash={{ .TokenHash }}&type=invite`
 
-仓库内四种邮件正文位于 `supabase/templates/`，`supabase/config.toml` 指向对应文件。`supabase config diff` 仅展示可比较的配置字段；`supabase config push` 会读取并上传邮件正文。生产注册开放前先确认自定义 SMTP 可投递，保留邮箱验证；受邀使用阶段可以暂时关闭生产注册。
+仓库内 `supabase/templates/` 是可选 token_hash 正文示例；当前配置不引用它们，按项目持有者要求保留生产邮件正文。默认邮件令牌片段在网页中必须主动确认后才能建立会话，邀请不直接进入密码重置。以后明确选择自定义正文时才在配置中引用示例；免费项目使用默认发信服务时不能修改正文。生产注册开放前先确认自定义 SMTP 可投递，保留邮箱验证；受邀使用阶段可以暂时关闭生产注册。
 
-模板链接应直接指向正式根路径（带 quiet-harbor/），不要先跳到 Auth 的默认 verify URL 再生成片段。页面先显示明确确认，确认后调用 verifyOtp；邀请不会自动渲染设置密码。真实邀请、验证和恢复邮件必须在测试项目验收后再上线，旧片段邮件需重新发送。
+可选模板链接直接指向正式根路径（带 quiet-harbor/），页面确认后调用 verifyOtp。当前默认正文也可用：Auth 返回的有效令牌片段先停在确认页面，确认后调用 setSession，并由 Auth 验证实际身份；邀请不会自动渲染设置密码。真实邮件投递仍需另行验收；不要将生成令牌的测试当成收信成功。
 
 ## 可追溯部署与数据保留
 

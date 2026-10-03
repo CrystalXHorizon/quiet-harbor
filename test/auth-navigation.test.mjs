@@ -27,3 +27,10 @@ test('current email-confirmation templates open consent and never password reset
   assert.deepEqual(state.emailLink,{type:'email',tokenHash:'confirmation-fixture'});
   assert.equal(state.recovery,false);assert.equal(state.invitation,false);assert.equal(state.open,true);
 });
+
+test('default email token fragments require explicit consent and carry no automatic recovery intent',()=>{
+  for(const type of ['invite','recovery','signup','magiclink']){
+    const state=authNavigation('https://example.com/#access_token=header.payload.signature&refresh_token=abcdefgh12345678&type='+type);
+    assert.equal(state.fragmentLink.type,type);assert.equal(state.recovery,false);assert.equal(state.implicit,false);assert.equal(state.open,true);
+  }
+});

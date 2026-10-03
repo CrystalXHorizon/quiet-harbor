@@ -25,7 +25,11 @@ test('real SQL RPC output feeds the Edge gateway: me, settings, reservations, cl
   const handler=createApiHandler({env:{SUPABASE_URL:'https://contract.supabase.co',SUPABASE_ANON_KEY:'anon-fixture',SUPABASE_SERVICE_ROLE_KEY:'service-fixture',AI_ENCRYPTION_KEY:master,ALLOWED_ORIGINS:'https://site.example'},fetchImpl:async(url,o)=>{
    const path=new URL(url).pathname;
    if(path==='/auth/v1/user')return Response.json({id,email_confirmed_at:'2026-10-03',factors:[]});
-   if(path.startsWith('/rest/v1/rpc/'))return Response.json(await rpc(path.split('/').at(-1),JSON.parse(o.body)));
+   if(path.startsWith('/rest/v1/rpc/')){
+    const name=path.split('/').at(-1),value=await rpc(name,JSON.parse(o.body));
+    // PostgREST serves PostgreSQL void functions as HTTP 204, not JSON null.
+    return name==='qh_record_ai_call'?new Response(null,{status:204}):Response.json(value);
+   }
    if(path==='/rest/v1/qh_ai_settings')return Response.json((await db.query('select config,encrypted_key,enabled from qh_ai_settings where id=true')).rows);
    assert.equal(String(url),'https://api.deepseek.com/chat/completions');upstream++;
    assert.equal(JSON.parse(o.body).model,'review-model');
