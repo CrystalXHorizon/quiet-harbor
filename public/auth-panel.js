@@ -28,7 +28,7 @@ function authError(error) {
     invalid_credentials: '邮箱或密码不正确。', email_not_confirmed: '请先打开验证邮件确认邮箱，再回来登录。',
     user_already_exists: '这个邮箱已经注册，可以直接登录或找回密码。', signup_disabled: '申请入口暂未开放，请稍后再试或联系站长。',
     over_email_send_rate_limit: '邮件发送较频繁，请稍后再试。', over_request_rate_limit: '操作较频繁，请稍后再试。',
-    weak_password: '密码强度不足，请使用至少 12 位、且不常见的密码。', same_password: '新密码不能与原密码相同。',
+    weak_password: '密码强度不足，请使用至少 8 位、且不常见的密码。', same_password: '新密码不能与原密码相同。',
     mfa_verification_failed: '验证码不正确或已过期，请使用验证器里的新验证码。',
     mfa_factor_name_conflict: '已有待验证的验证器，请先完成或重新开始设置。',
     bad_jwt: '登录已过期，请重新登录。', session_not_found: '登录已过期，请重新登录。'
@@ -122,7 +122,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
     const form = element('form', undefined, 'auth-form');
     const email = input(form, '邮箱', 'email', { type: 'email', autocomplete: 'email', maxLength: 254 });
     let password, nickname;
-    if (mode !== 'reset') password = input(form, '密码', 'password', { type: 'password', autocomplete: mode === 'signup' ? 'new-password' : 'current-password', minLength: mode === 'signup' ? 12 : 1, maxLength: 128 });
+    if (mode !== 'reset') password = input(form, '密码', 'password', { type: 'password', autocomplete: mode === 'signup' ? 'new-password' : 'current-password', minLength: mode === 'signup' ? 8 : 1, maxLength: 128 });
     if (mode === 'signup') {
       nickname = input(form, '社区昵称', 'nickname', { autocomplete: 'nickname', minLength: 2, maxLength: 30 });
       form.append(element('small', '昵称会展示在社区，邮箱不会公开。聊天仍只保留在当前页面；账户登录状态保存在这台设备上。'));
@@ -143,10 +143,10 @@ export async function initAuth({ onChange = () => {} } = {}) {
     content.append(form, button(mode === 'reset' ? '返回登录' : '忘记密码', () => switchMode(mode === 'reset' ? 'login' : 'reset'), 'plain'));
   }
   function renderPassword() {
-    content.append(element('p', '请为账户设置至少 12 位的新密码。'));
+    content.append(element('p', '请为账户设置至少 8 位的新密码。'));
     const form = element('form', undefined, 'auth-form');
-    const password = input(form, '新密码', 'new-password', { type: 'password', autocomplete: 'new-password', minLength: 12, maxLength: 128 });
-    const confirm = input(form, '确认新密码', 'password-confirm', { type: 'password', autocomplete: 'new-password', minLength: 12, maxLength: 128 });
+    const password = input(form, '新密码', 'new-password', { type: 'password', autocomplete: 'new-password', minLength: 8, maxLength: 128 });
+    const confirm = input(form, '确认新密码', 'password-confirm', { type: 'password', autocomplete: 'new-password', minLength: 8, maxLength: 128 });
     submit(form, '保存密码', () => {
       if (password.value !== confirm.value) { message('两次密码不一致，请重新输入。'); return; }
       const pass = password.value; password.value = ''; confirm.value = '';

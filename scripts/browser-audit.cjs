@@ -7,7 +7,7 @@ const user={id:uid,email:'browser@example.test',aud:'authenticated',role:'authen
 const token=aal=>'header.'+Buffer.from(JSON.stringify({sub:uid,aal,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.fixture';
 const tokens=aal=>({access_token:token(aal),refresh_token:'fixture-refresh',token_type:'bearer',expires_in:3600,expires_at:Math.floor(Date.now()/1000)+3600,user});
 async function fixture(browser,{owner=false,slow=false,chatStatus=200}={}){
- const context=await browser.newContext({viewport:{width:390,height:844}});const calls=[],errors=[];let verifies=0,pkce=0;
+ const context=await browser.newContext({viewport:{width:390,height:844}});const calls=[],errors=[];let verifies=0,pkce=0,signups=0,passwordUpdates=0;
  let release;const gate=slow?new Promise(resolve=>release=resolve):Promise.resolve();
  const profile={id:uid,nickname:owner?'测试站长':'测试成员',role:owner?'owner':'member',status:'active',admission_status:'approved'};
  const cors={'access-control-allow-origin':base,'access-control-allow-headers':'authorization,apikey,content-type,x-client-info,x-supabase-api-version','access-control-allow-methods':'GET,POST,PUT,DELETE,OPTIONS'};
@@ -17,7 +17,8 @@ async function fixture(browser,{owner=false,slow=false,chatStatus=200}={}){
   if(req.method()==='OPTIONS')return route.fulfill({status:204,headers:cors});
   if(path==='/auth/v1/token'){if(new URL(req.url()).searchParams.get('grant_type')==='pkce'){pkce++;assert.ok(req.postDataJSON().code_verifier);}return json(route,tokens(owner?'aal2':'aal1'));}
   if(path==='/auth/v1/verify'){verifies++;return json(route,tokens('aal1'));}
-  if(path==='/auth/v1/user')return json(route,user);
+  if(path==='/auth/v1/signup'){signups++;assert.equal(req.postDataJSON().password.length,8);return json(route,user);}
+  if(path==='/auth/v1/user'){if(req.method()==='PUT'){passwordUpdates++;assert.equal(req.postDataJSON().password.length,8);}return json(route,user);}
   if(path==='/auth/v1/logout')return json(route,{});
   if(path!=='/functions/v1/api')return json(route,{code:'unexpected'},400);
   const p=req.postDataJSON();calls.push(p);
@@ -31,7 +32,7 @@ async function fixture(browser,{owner=false,slow=false,chatStatus=200}={}){
  });
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
  async function signIn(){await page.goto(base);await page.locator('#account-open').click();await page.getByLabel('邮箱',{exact:true}).fill(user.email);await page.getByLabel('密码',{exact:true}).fill('browser-fixture-password');await page.locator('#auth-dialog form button[type=submit]').click();await page.waitForFunction(()=>Boolean(localStorage.getItem('sb-quiet-harbor-qa-auth-token')));if(!slow)await page.getByText(`${profile.nickname} · ${owner?'站长':'普通成员'}`,{exact:true}).waitFor();await page.getByRole('button',{name:'关闭账户设置',exact:true}).click();}
- return {context,page,calls,errors,signIn,release:()=>release?.(),get verifies(){return verifies;},get pkce(){return pkce;}};
+ return {context,page,calls,errors,signIn,release:()=>release?.(),get verifies(){return verifies;},get pkce(){return pkce;},get signups(){return signups;},get passwordUpdates(){return passwordUpdates;}};
 }
 async function main(){const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});try{
  const headers=await fetch(base).then(r=>r.headers);assert.match(headers.get('content-security-policy'),/frame-ancestors 'none'/);assert.equal(headers.get('x-frame-options'),'DENY');
@@ -46,6 +47,16 @@ async function main(){const browser=await chromium.launch({headless:true,...(pro
   assert.ok(await tab.evaluate(el=>el.getBoundingClientRect().height>=44));
  }
  assert.deepEqual(contrast.errors,[]);await contrast.context.close();
+ const signup=await fixture(browser);await signup.page.goto(base);await signup.page.locator('#account-open').click();await signup.page.getByRole('button',{name:'申请加入',exact:true}).click();
+ await signup.page.getByLabel('邮箱',{exact:true}).fill(user.email);await signup.page.getByLabel('社区昵称',{exact:true}).fill('测试成员');
+ const signupPassword=signup.page.getByLabel('密码',{exact:true}),signupSubmit=signup.page.getByRole('button',{name:'注册并验证邮箱',exact:true});
+ await signupPassword.fill('Qh7test');await signupSubmit.click();assert.equal(await signupPassword.evaluate(el=>el.validity.tooShort),true);assert.equal(signup.signups,0);
+ await signupPassword.fill('Qh8test!');await signupSubmit.click();await signup.page.getByRole('status').filter({hasText:'第一步已提交'}).waitFor();assert.equal(signup.signups,1);assert.deepEqual(signup.errors,[]);await signup.context.close();
+ const passwordChange=await fixture(browser);await passwordChange.page.goto(base+'/?type=recovery&token_hash=email-fixture');await passwordChange.page.getByRole('button',{name:'确认使用邮件链接',exact:true}).click();
+ const newPassword=passwordChange.page.getByLabel('新密码',{exact:true}),confirmation=passwordChange.page.getByLabel('确认新密码',{exact:true}),savePassword=passwordChange.page.getByRole('button',{name:'保存密码',exact:true});
+ await newPassword.fill('Qh7test');await confirmation.fill('Qh7test');await savePassword.click();assert.equal(await newPassword.evaluate(el=>el.validity.tooShort),true);assert.equal(passwordChange.passwordUpdates,0);
+ await newPassword.fill('Qh8test!');await confirmation.fill('Other8!?');await savePassword.click();await passwordChange.page.getByText('两次密码不一致，请重新输入。',{exact:true}).waitFor();assert.equal(passwordChange.passwordUpdates,0);
+ await confirmation.fill('Qh8test!');const savedPassword=passwordChange.page.waitForResponse(response=>response.url()===host+'/auth/v1/user'&&response.request().method()==='PUT');await savePassword.click();assert.equal((await savedPassword).status(),200);await passwordChange.page.getByText('测试成员 · 普通成员',{exact:true}).waitFor();assert.equal(passwordChange.passwordUpdates,1);assert.deepEqual(passwordChange.errors,[]);await passwordChange.context.close();
  const rejected=await fixture(browser);await rejected.page.goto(base+'/#access_token=attacker&refresh_token=attacker&type=invite');await rejected.page.locator('#auth-dialog').waitFor({state:'visible'});assert.equal(await rejected.page.getByLabel('新密码',{exact:true}).count(),0);assert.equal(rejected.verifies,0);assert.equal(rejected.calls.length,0);assert.equal(await rejected.page.evaluate(()=>location.hash),'');assert.deepEqual(rejected.errors,[]);await rejected.context.close();
  for(const type of ['invite','recovery']){
   const fragment=await fixture(browser);
@@ -63,6 +74,6 @@ async function main(){const browser=await chromium.launch({headless:true,...(pro
  const invalid=await fixture(browser);await invalid.signIn();await invalid.page.locator('#message').fill('响应为 null');await invalid.page.locator('#send').click();await invalid.page.getByText('连接暂时不可用，请稍后重试。',{exact:true}).waitFor();assert.deepEqual(invalid.errors,[]);await invalid.context.close();
  const paging=await fixture(browser,{owner:true});await paging.signIn();await paging.page.locator('#admin-nav').click();for(const name of ['用户管理','操作记录']){await paging.page.getByRole('button',{name,exact:true}).click();await paging.page.getByRole('button',{name:'下一页',exact:true}).click();await paging.page.getByRole('button',{name:'上一页',exact:true}).waitFor();assert.equal(await paging.page.getByRole('button',{name:'下一页',exact:true}).count(),0);}assert.ok(paging.calls.some(x=>x.action==='admin.users'&&x.page===1));assert.ok(paging.calls.some(x=>x.action==='admin.audit'&&x.page===1));assert.deepEqual(paging.errors,[]);await paging.context.close();
  const mobile=await fixture(browser);await mobile.page.goto(base);await mobile.page.locator('#message').fill('我想伤害自己');await mobile.page.locator('#send').click();await mobile.page.locator('#help-dialog').waitFor({state:'visible'});assert.equal(await mobile.page.evaluate(()=>document.activeElement.id),'help-title');await mobile.page.getByRole('dialog').getByRole('button',{name:'我知道了'}).click();assert.ok(await mobile.page.locator('#clear').evaluate(el=>el.getBoundingClientRect().height>=44));await mobile.page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));assert.equal(await mobile.page.locator('.sidebar').evaluate(el=>Math.round(el.getBoundingClientRect().top)),0);assert.ok(await mobile.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await fs.mkdir('test-results/browser',{recursive:true});await mobile.page.evaluate(()=>window.scrollTo(0,0));await mobile.page.screenshot({path:'test-results/browser/audit-mobile.png',fullPage:true});assert.deepEqual(mobile.errors,[]);await mobile.context.close();
- console.log('Audit browser checks passed: selected auth-tab contrast, token rejection/confirmation/PKCE, pending profile, expired session, invalid JSON shape, admin pagination, mobile target/focus/sticky navigation and real CSP headers');
+ console.log('Audit browser checks passed: 8-character signup/password change, shorter and mismatched passwords blocked, selected auth-tab contrast, token rejection/confirmation/PKCE, pending profile, expired session, invalid JSON shape, admin pagination, mobile target/focus/sticky navigation and real CSP headers');
  }finally{await browser.close();}}
 main().catch(e=>{console.error(e);process.exitCode=1;});

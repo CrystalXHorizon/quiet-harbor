@@ -2,7 +2,7 @@ project_id = "quiet-harbor"
 
 [auth]
 enable_signup = true
-minimum_password_length = 12
+minimum_password_length = 8
 
 [auth.email]
 enable_confirmations = true
