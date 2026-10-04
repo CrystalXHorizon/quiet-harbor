@@ -5,6 +5,8 @@ const CATEGORIES={share:'想说说',advice:'寻求建议',progress:'分享小进
 const STATUSES={draft:'草稿',pending:'待审核',published:'已发布',rejected:'退回修改',hidden:'已下架',resolved:'已处理',open:'待处理',active:'正常',muted:'禁言',banned:'已封禁'};
 const ROLES={member:'普通用户',moderator:'社区管理员',owner:'站长'};
 const stamp=value=>{const date=new Date(value);return Number.isNaN(date.getTime())?'':date.toLocaleString('zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});};
+const restrictionStamp=value=>new Date(value).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+const localTime=value=>{const date=new Date(value);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);};
 function node(tag,text,className){const el=document.createElement(tag);if(text!==undefined&&text!==null)el.textContent=String(text);if(className)el.className=className;return el;}
 function button(text,action,kind='secondary'){const el=node('button',text,`qh-button ${kind}`);el.type='button';el.addEventListener('click',action);return el;}
 function field(label,type='text',value='',options={}){const wrap=node('label',null,'qh-field');wrap.append(node('span',label));let input;
@@ -202,12 +204,68 @@ export function initCommunity({api,onRequireAuth,getSession,onAccountRefresh}){
    host.append(section);
   }
  }
- function renderUsers(host,data){host.append(node('p','禁言限制发帖和回应；封禁限制账户使用。角色调整仅站长可操作，并需要完成二次验证。','qh-muted'));for(const user of data.users||[]){const card=node('article',null,'qh-post-card');card.append(node('h3',user.nickname||'社区成员'),node('p',`${ROLES[user.role]||user.role} · ${STATUSES[user.status]||user.status} · 注册于 ${stamp(user.created_at)}`,'qh-meta'));if(user.id===profile().id||user.role==='owner'){card.append(node('p','当前账户及站长账户不能在这里修改。','qh-muted'));host.append(card);continue;}const form=node('form');const role=field('角色','select',user.role,{choices:{member:'普通用户',moderator:'社区管理员'}});const status=field('账户状态','select',user.status,{choices:{active:'正常',muted:'禁言',...(isOwner()?{banned:'封禁'}:{})}});if(isOwner())form.append(role.wrap);else if(user.role!=='member'||user.status==='banned'){card.append(node('p','此账户需要站长处理。','qh-muted'));host.append(card);continue;}const reason=field('操作原因','text','',{required:true,maxLength:1000});const message=notice();const save=node('button','保存调整','qh-button primary');save.type='submit';form.append(status.wrap,reason.wrap,message,actions(save));form.addEventListener('submit',event=>{event.preventDefault();if(!form.reportValidity())return;perform(save,message,()=>api('admin.user',{id:user.id,status:status.input.value,...(isOwner()&&role.input.value!==user.role?{role:role.input.value}:{}),reason:reason.input.value.trim()}),()=>{setMessage(message,'账户调整已保存。');user.role=role.input.value;user.status=status.input.value;});});card.append(form);if(isOwner())card.append(button('永久抹除账户',()=>reasonDialog('永久抹除这个账户？','将删除账户及其帖子、回应、审核快照、申请与通知，操作无法撤销。备份由站点保留策略处理。请填写经用户确认的删除原因。','admin.purge',{id:user.id},'账户及关联内容已抹除。',true,loadAdmin),'danger'));host.append(card);}if(!data.users?.length)host.append(node('p','暂时没有用户记录。','qh-muted'));}
+ function renderUsers(host,data){
+  host.append(node('p','禁言限制发帖和回应；封禁限制账户使用。限时限制到期自动恢复，永久限制需手动解除。调整需要完成二次验证，角色与封禁仅站长可操作。','qh-muted'));
+  for(const user of data.users||[]){
+   const card=node('article',null,'qh-post-card'),meta=node('p',null,'qh-meta'),timing=node('p',null,'qh-meta');
+   function summary(){
+    meta.textContent=`${ROLES[user.role]||user.role} · ${STATUSES[user.status]||user.status} · 注册于 ${stamp(user.created_at)}`;
+    timing.hidden=user.status==='active';
+    timing.textContent=timing.hidden?'':`${user.status==='banned'?'封禁':'禁言'}时间：${user.status_started_at?restrictionStamp(user.status_started_at)+' 起，':''}${user.status_until?restrictionStamp(user.status_until)+' 到期':'永久，需手动解除'}`;
+   }
+   summary();card.append(node('h3',user.nickname||'社区成员'),meta,timing);
+   if(user.id===profile().id||user.role==='owner'){card.append(node('p','当前账户及站长账户不能在这里修改。','qh-muted'));host.append(card);continue;}
+   if(!isOwner()&&(user.role!=='member'||user.status==='banned')){card.append(node('p','此账户需要站长处理。','qh-muted'));host.append(card);continue;}
+   const form=node('form'),role=field('角色','select',user.role,{choices:{member:'普通用户',moderator:'社区管理员'}});
+   const status=field('账户状态','select',user.status,{choices:{active:'正常',muted:'禁言',...(isOwner()?{banned:'封禁'}:{})}});
+   const duration=field('限制时长','select',user.status==='active'?'86400':'keep',{choices:{keep:'保持原到期时间',3600:'1 小时',86400:'1 天',259200:'3 天',604800:'7 天',2592000:'30 天',custom:'自定义到期时间',permanent:'永久'}});
+   const until=field('到期时间','datetime-local',localTime(user.status_until||Date.now()+86400000),{hint:'按你当前的本地时间填写，最晚可设置到一年后。'});
+   const preview=node('p',null,'qh-muted');preview.setAttribute('aria-live','polite');
+   const reason=field('操作原因','text','',{required:true,maxLength:1000}),message=notice(),save=node('button','保存调整','qh-button primary');save.type='submit';
+   function updateTiming(){
+    setMessage(message,'');
+    const restricted=status.input.value!=='active',label=status.input.value==='banned'?'封禁':'禁言';
+    duration.wrap.hidden=!restricted;duration.input.disabled=!restricted;duration.wrap.firstChild.textContent=`${label}时长`;
+    const keep=duration.input.querySelector('option[value="keep"]');keep.disabled=!restricted||status.input.value!==user.status;keep.hidden=keep.disabled;
+    if(duration.input.value==='keep'&&keep.disabled)duration.input.value='86400';
+    const custom=restricted&&duration.input.value==='custom';until.wrap.hidden=!custom;until.input.disabled=!custom;until.input.required=custom;until.input.min=localTime(Date.now()+60000);until.input.max=localTime(Date.now()+31536000000);
+    preview.hidden=!restricted;
+    if(!restricted){preview.textContent='';return;}
+    const mode=duration.input.value;
+    if(mode==='keep')preview.textContent=user.status_until?`保持原到期时间：${restrictionStamp(user.status_until)}，到期自动恢复正常。`:'保持永久限制，需手动解除。';
+    else if(mode==='permanent')preview.textContent=`永久${label}，需管理员手动恢复为正常。`;
+    else if(mode==='custom')preview.textContent=until.input.value?`${restrictionStamp(until.input.value)} 到期，自动恢复正常。`:'请选择到期时间。';
+    else preview.textContent=`保存后${duration.input.selectedOptions[0].textContent}到期，预计 ${restrictionStamp(Date.now()+Number(mode)*1000)}；到期自动恢复正常。`;
+   }
+   status.input.addEventListener('change',updateTiming);duration.input.addEventListener('change',updateTiming);until.input.addEventListener('input',updateTiming);updateTiming();
+   if(isOwner())form.append(role.wrap);form.append(status.wrap,duration.wrap,until.wrap,preview,reason.wrap,message,actions(save));
+   form.addEventListener('submit',event=>{
+    event.preventDefault();if(!form.reportValidity())return;
+    const payload={id:user.id,status:status.input.value,...(isOwner()&&role.input.value!==user.role?{role:role.input.value}:{}),reason:reason.input.value.trim()};
+    if(payload.status!=='active'){
+     const mode=duration.input.value;
+     if(mode==='permanent')payload.status_until=null;
+     else if(mode==='custom'){
+      const end=new Date(until.input.value).getTime();
+      if(!Number.isFinite(end)||end<=Date.now()||end>Date.now()+31536000000){setMessage(message,'请选择未来一年内的到期时间。',true);return;}
+      payload.status_until=new Date(end).toISOString();
+     }else if(mode!=='keep')payload.duration_seconds=Number(mode);
+    }
+    perform(save,message,()=>api('admin.user',payload),result=>{
+     Object.assign(user,result.profile);status.input.value=user.status;role.input.value=user.role;until.input.value=localTime(user.status_until||Date.now()+86400000);
+     duration.input.value=user.status==='active'?'86400':'keep';summary();updateTiming();
+     setMessage(message,user.status==='active'?'账户调整已保存。':user.status_until?`账户调整已保存，将于 ${restrictionStamp(user.status_until)} 自动恢复正常。`:'账户调整已保存，永久限制需手动解除。');
+    });
+   });
+   card.append(form);if(isOwner())card.append(button('永久抹除账户',()=>reasonDialog('永久抹除这个账户？','将删除账户及其帖子、回应、审核快照、申请与通知，操作无法撤销。备份由站点保留策略处理。请填写经用户确认的删除原因。','admin.purge',{id:user.id},'账户及关联内容已抹除。',true,loadAdmin),'danger'));host.append(card);
+  }
+  if(!data.users?.length)host.append(node('p','暂时没有用户记录。','qh-muted'));
+ }
  function renderAI(host,data){const form=node('form');const saved=data.config||{...PROVIDERS[0],provider:PROVIDERS[0].id,jsonMode:true};host.append(node('p','API 密钥仅保存在后端。社区管理员和普通用户不会收到密钥。保存及测试需要站长二次验证。','qh-muted'));const provider=field('AI 供应商','select',saved.provider,{choices:Object.fromEntries(PROVIDERS.map(p=>[p.id,p.name]))});const base=field('API 基础地址','url',saved.base,{required:true,hint:'自定义域名还需要加入后端 AI_ALLOWED_HOSTS 配置。不要填写密钥或查询参数。'});const model=field('模型 ID','text',saved.model,{required:true,maxLength:200});const moderationModel=field('社区审核模型 ID（可留空）','text',data.moderation_model||'',{maxLength:160,hint:'留空使用聊天模型。使用同一供应商及后端密钥，审核不读取私人聊天；下方连接测试仅验证聊天模型。'});const protocol=field('接口协议','select',saved.protocol,{choices:{openai:'OpenAI 兼容 Chat Completions',anthropic:'Anthropic Messages'}});const tokens=field('输出上限参数','select',saved.tokenField,{choices:{max_tokens:'max_tokens',max_completion_tokens:'max_completion_tokens'}});const json=check('启用 JSON 响应格式（供应商支持时）',saved.jsonMode);const key=field('API Key','password','',{autocomplete:'new-password',maxLength:1024,hint:data.key_set?`已配置密钥（末尾 ${data.key_last4||'••••'}）。留空保留原密钥。更换供应商时请填写对应的新密钥。`:'请填写供应商 API Key；保存后无法在页面中查看完整值。'});const enabled=check('启用 AI 聊天与社区 AI 审核',!!data.enabled);const userLimit=field('每位用户每日模型调用上限','number',data.user_daily_limit??30,{required:true,min:1,max:1000});const globalLimit=field('全站每日模型调用上限','number',data.global_daily_limit??300,{required:true,min:1,max:100000});const message=notice();const test=button('测试聊天连接',()=>act(false));const save=node('button','保存配置','qh-button primary');save.type='submit';provider.input.addEventListener('change',()=>{const p=PROVIDERS.find(p=>p.id===provider.input.value);base.input.value=p.base;model.input.value=p.model;protocol.input.value=p.protocol;tokens.input.value=p.tokenField;json.input.checked=p.id==='deepseek';key.input.value='';moderationModel.input.value='';});form.append(provider.wrap,base.wrap,model.wrap,moderationModel.wrap,protocol.wrap,tokens.wrap,json.wrap,key.wrap,enabled.wrap,actions(userLimit.wrap,globalLimit.wrap),node('p','社区帖子与回应自动提交审核，模型不可用时保留待人工复核。聊天、审核和测试连接共享每日模型调用额度，均可能产生供应商费用。AI 不会自动永久封号。','qh-muted'),message,actions(test,save));form.addEventListener('submit',event=>{event.preventDefault();act(true);});host.append(form);
   async function act(saving){if(!form.reportValidity())return;let config;try{config=normalizeConfig({provider:provider.input.value,base:base.input.value,model:model.input.value,protocol:protocol.input.value,tokenField:tokens.input.value,jsonMode:json.input.checked});}catch(error){setMessage(message,error.message,true);return;}test.disabled=save.disabled=true;await perform(null,message,()=>api(saving?'admin.ai.save':'admin.ai.test',{config,...(key.input.value.trim()?{key:key.input.value.trim()}:{}),...(saving?{enabled:enabled.input.checked,moderation_model:moderationModel.input.value.trim(),user_daily_limit:Number(userLimit.input.value),global_daily_limit:Number(globalLimit.input.value)}:{})}),async result=>{if(saving){key.input.value='';setMessage(message,'AI 配置已保存。');await onAccountRefresh?.();}else setMessage(message,result.message||'连接测试通过。');});test.disabled=save.disabled=false;}
  }
  function renderUsage(host,data){host.append(node('p',`${data.today||'今日'}的用量按 UTC 日界线统计。聊天、社区审核和连接测试共享模型调用额度；每次供应商请求前预留一次，失败或取消也计入。`,'qh-muted'));const grid=node('div',null,'qh-stats');for(const [label,value] of [['调用预留总数',data.total??0],['已发起供应商调用',data.provider_calls??0],['聊天轮次',data.chat_turns??0],['社区审核预留',data.moderation_used??0],['全站每日调用上限',data.global_daily_limit??'—'],['每人每日调用上限',data.user_daily_limit??'—']]){const card=node('div',null,'qh-stat');card.append(node('span',label),node('strong',value));grid.append(card);}host.append(grid,node('h2','用户模型调用预留'));for(const user of data.users||[]){const row=node('div',null,'qh-list-row');row.append(node('span',user.nickname||'社区成员'),node('strong',`${user.used} 次`));host.append(row);}if(!data.users?.length)host.append(node('p','今天还没有用量记录。','qh-muted'));host.append(button('刷新用量',loadAdmin));}
- function renderAudit(host,data){const labels={'ai.save':'更新 AI 配置','ai.test':'测试 AI 连接','posts.delete':'删除帖子','comments.delete':'删除回应','admin.purge':'抹除账户','moderation.ai.approve':'AI 审核通过','moderation.ai.reject':'AI 审核退回','moderation.ai.review':'AI 转人工复核','moderation.ai.error':'AI 审核失败','admission.approved':'通过加入申请','admission.rejected':'拒绝加入申请','invite.create':'创建邀请码','invite.update':'调整邀请码','admin.moderate':'内容审核','admin.user':'调整用户','admin.ai.save':'更新 AI 配置','admin.ai.test':'测试 AI 连接'};for(const event of data.events||[]){const card=node('article',null,'qh-audit');card.append(node('strong',labels[event.action]||(event.action.startsWith('moderate.')?'人工内容审核':event.action.startsWith('user.')?'调整用户状态':event.action)),node('p',`${stamp(event.created_at)} · 操作者 ${event.actor_id||'系统'}`,'qh-meta'));if(event.target_id)card.append(node('p',`对象：${event.target_id}`,'qh-meta'));if(event.reason)card.append(node('p',event.reason));host.append(card);}if(!data.events?.length)host.append(node('p','目前没有管理操作记录。','qh-muted'));}
+ function renderAudit(host,data){const labels={'ai.save':'更新 AI 配置','ai.test':'测试 AI 连接','posts.delete':'删除帖子','comments.delete':'删除回应','admin.purge':'抹除账户','moderation.ai.approve':'AI 审核通过','moderation.ai.reject':'AI 审核退回','moderation.ai.review':'AI 转人工复核','moderation.ai.error':'AI 审核失败','admission.approved':'通过加入申请','admission.rejected':'拒绝加入申请','invite.create':'创建邀请码','invite.update':'调整邀请码','admin.moderate':'内容审核','admin.user':'调整用户','user.restriction.expired':'限制到期自动解除','admin.ai.save':'更新 AI 配置','admin.ai.test':'测试 AI 连接'};for(const event of data.events||[]){const card=node('article',null,'qh-audit');card.append(node('strong',labels[event.action]||(event.action.startsWith('moderate.')?'人工内容审核':event.action.startsWith('user.')?'调整用户状态':event.action)),node('p',`${stamp(event.created_at)} · 操作者 ${event.actor_id||'系统'}`,'qh-meta'));if(event.target_id)card.append(node('p',`对象：${event.target_id}`,'qh-meta'));if(event.status_until)card.append(node('p',`限制到期时间：${restrictionStamp(event.status_until)}`,'qh-meta'));else if(/\.(muted|banned)$/.test(event.action))card.append(node('p','限制期限：永久','qh-meta'));if(event.reason)card.append(node('p',event.reason));host.append(card);}if(!data.events?.length)host.append(node('p','目前没有管理操作记录。','qh-muted'));}
  function reset(){epoch++;listTicket++;adminTicket++;closeDialogs();community.replaceChildren();admin.replaceChildren();filter={scope:'all',category:''};adminTab='queue';adminPage=0;}
  return {showCommunity,showAdmin,reset,openPost,compose,showBlocks,appealPost:(id,after)=>reasonDialog('提交申诉','说明你希望复核的原因。','appeals.create',{post_id:id},'申诉已提交，管理员会复核。',true,after),appealComment:(id,after)=>reasonDialog('回应申诉','说明你希望复核的原因。','appeals.create',{comment_id:id},'申诉已提交，管理员会复核。',true,after),deleteComment:(id,after)=>reasonDialog('删除这条回应？','删除后会从社区移除，这一步不能在页面中撤销。','comments.delete',{id},'回应已删除。',false,after)};
 }

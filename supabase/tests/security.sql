@@ -23,7 +23,7 @@ begin
  if (r->>'total')::integer<>0 or r->'users'<>'[]'::jsonb then raise exception 'unexpected empty usage'; end if;
  if has_table_privilege('authenticated','public.qh_ai_settings','select') then raise exception 'ciphertext table readable by browser'; end if;
  if has_table_privilege('anon','public.qh_posts','select') then raise exception 'anonymous table access'; end if;
- if has_function_privilege('authenticated','public.qh_action(uuid,text,jsonb,boolean)','execute') then raise exception 'actor RPC callable by browser'; end if;
+ if has_function_privilege('authenticated','public.qh_action(uuid,text,jsonb,boolean,uuid)','execute') then raise exception 'actor RPC callable by browser'; end if;
  if has_function_privilege('anon','public.qh_reserve_ai(uuid)','execute') then raise exception 'quota RPC callable by browser'; end if;
  if exists(select 1 from pg_tables where schemaname='public' and tablename like 'qh_%' and not rowsecurity) then raise exception 'missing RLS'; end if;
 
@@ -74,10 +74,10 @@ begin
  failed:=false;begin perform public.qh_action(o,'posts.get',jsonb_build_object('id',p));exception when others then failed:=sqlerrm='not_found';end;
  if not failed then raise exception 'blocked detail visible'; end if;
  r:=public.qh_action(b,'posts.get',jsonb_build_object('id',p));if jsonb_array_length(r->'comments')<>0 then raise exception 'blocked comments visible';end if;
- perform public.qh_action(m,'admin.user',jsonb_build_object('id',o,'status','muted','reason','test'),true);
+ perform public.qh_action(m,'admin.user',jsonb_build_object('id',o,'status','muted','status_until',null,'reason','test'),true);
  failed:=false;begin perform public.qh_action(o,'posts.save','{"title":"No","body":"Muted","category":"share","preference":"listen","submit":true}');exception when others then failed:=sqlerrm='muted';end;
  if not failed then raise exception 'muted posting bypassed'; end if;
- perform public.qh_action(a,'admin.user',jsonb_build_object('id',o,'status','banned','reason','test'),true);
+ perform public.qh_action(a,'admin.user',jsonb_build_object('id',o,'status','banned','status_until',null,'reason','test'),true);
  failed:=false;begin perform public.qh_action(o,'posts.list');exception when others then failed:=sqlerrm='forbidden';end;
  if not failed then raise exception 'banned user accepted'; end if;
  failed:=false;begin perform public.qh_action(m,'admin.user',jsonb_build_object('id',o,'status','active','reason','test'),true);exception when others then failed:=sqlerrm='forbidden';end;

@@ -41,7 +41,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
   if (!dialog) throw new Error('缺少账户对话框。');
   let config = null, backend = null, mode = 'login', pending = false, viewId = 0, enrolled = null;
   const navigation = authNavigation(location.href);
-  let startupError = '', recovery = navigation.recovery, factorId = null, sessionExpired = false;
+  let startupError = '', recovery = navigation.recovery, factorId = null, sessionExpired = false, mfaView = false, emailChallenge = null, signedOutNotice = '';
   if (navigation.reset) mode = 'reset';
   let invitation = navigation.invitation;
   let emailLink = navigation.emailLink;
@@ -51,12 +51,12 @@ export async function initAuth({ onChange = () => {} } = {}) {
   let content, status;
   function open() { render(); if (!dialog.open) dialog.showModal(); }
   function message(text) { status.textContent = text; }
-  function clearSensitive() { dialog.querySelectorAll('input[type="password"], input[name="totp"]').forEach(node => { node.value = ''; }); }
+  function clearSensitive() { dialog.querySelectorAll('input[type="password"], input[name="totp"], input[name="email-code"]').forEach(node => { node.value = ''; }); }
   function abandonEnrollment() {
     const unused = enrolled?.id; enrolled = null; factorId = null;
     if (unused && backend) void backend.client.auth.mfa.unenroll({ factorId: unused }).catch(() => {});
   }
-  dialog.addEventListener('close', () => { clearSensitive(); abandonEnrollment(); viewId++; });
+  dialog.addEventListener('close', () => { clearSensitive(); abandonEnrollment(); mfaView = false; emailChallenge = null; viewId++; });
   async function run(task, success) {
     if (pending) return;
     pending = true;
@@ -107,8 +107,10 @@ export async function initAuth({ onChange = () => {} } = {}) {
       }), button('取消', () => { emailLink = null; fragmentLink = null; recovery = false; invitation = false; render(); }));
       return;
     }
+    // Email-only MFA must not strand a password-recovery session: it can set a
+    // password through Auth, then sign in afresh. No application data is exposed.
+    if (recovery && session?.user && (!session.mfaRequired || session.totpEnabled === false)) { title.textContent = '设置新密码'; renderPassword(); return; }
     if (session?.mfaRequired) { title.textContent = '完成二次验证'; renderAccount(session); return; }
-    if (recovery && session?.user) { title.textContent = '设置新密码'; renderPassword(); return; }
     if (session?.user) { renderAccount(session); return; }
     if (mode === 'reset' || recovery || invitation) {
       mode = 'reset'; title.textContent = '找回密码';
@@ -150,7 +152,13 @@ export async function initAuth({ onChange = () => {} } = {}) {
     submit(form, '保存密码', () => {
       if (password.value !== confirm.value) { message('两次密码不一致，请重新输入。'); return; }
       const pass = password.value; password.value = ''; confirm.value = '';
-      return run(() => backend.client.auth.updateUser({ password: pass }), async () => { recovery = false; invitation = false; history.replaceState(null, '', landingUrl()); await backend.refresh(); render(); message('密码已更新。'); });
+      const emailProof = backend.getSession()?.security?.emailVerified && !backend.getSession()?.security?.nativeVerified;
+      const recoveryRelogin = recovery && backend.getSession()?.mfaRequired && backend.getSession()?.totpEnabled === false;
+      return run(() => emailProof ? backend.api('security.password.update', { password: pass }) : backend.client.auth.updateUser({ password: pass }), async result => {
+        recovery = false; invitation = false; history.replaceState(null, '', landingUrl());
+        if (result.sign_out || recoveryRelogin) { signedOutNotice = '密码已更新，请使用新密码重新登录。'; await backend.signOut().catch(() => {}); render(); message('密码已更新，请使用新密码重新登录。'); }
+        else { await backend.refresh(); render(); message('密码已更新。'); }
+      });
     });
     content.append(form);
   }
@@ -169,7 +177,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
       content.append(form);
     }
     const security = element('section', undefined, 'auth-mfa');
-    security.append(element('h3', '账户安全'), element('p', '已设置验证器的账户，每次登录后都需要完成第二步验证。站长和管理员读取管理数据、修改设置或处理社区内容前，都需要完成验证。'));
+    security.append(element('h3', '账户安全'), element('p', '二次验证可以使用邮箱验证码或验证器，通过一种即可。启用后，每次登录都需要完成第二步；站长和管理员访问管理功能前也需要验证。'));
     security.append(button(session.mfaRequired ? '继续二次验证' : '设置或验证二次验证', () => { void showMfa(security); }));
     content.append(security);
     const actions = element('div', undefined, 'dialog-actions');
@@ -196,16 +204,74 @@ export async function initAuth({ onChange = () => {} } = {}) {
     section.append(form, invite); content.append(section);
   }
   async function showMfa(container) {
+    mfaView = true;
     await run(async () => {
       const factors = await backend.client.auth.mfa.listFactors();
       if (factors.error) throw factors.error;
       const verified = factors.data.totp?.filter(item => item.status === 'verified') || [];
       const assurance = await backend.client.auth.mfa.getAuthenticatorAssuranceLevel();
       if (assurance.error) throw assurance.error;
-      return { verified, assurance: assurance.data };
+      const email = await backend.api('security.mfa.status');
+      return { verified, assurance: assurance.data, email };
     }, result => {
       container.replaceChildren(element('h3', '二次验证'));
-      if (result.assurance.currentLevel === 'aal2') { container.append(element('p', '本次登录已完成二次验证。')); message(''); return; }
+      if (result.email.verified || result.assurance.currentLevel === 'aal2') {
+        container.append(element('p', '本次登录已完成二次验证。'));
+        if (result.email.email_enabled) container.append(button('关闭邮箱二次验证', () => run(() => backend.api('security.email.disable'), async () => { mfaView = false; await backend.refresh(); render(); message('邮箱二次验证已关闭。已绑定的验证器仍可使用。'); })));
+        message('');
+      }
+      const tabs = element('div', undefined, 'auth-tabs support-actions');
+      const pane = element('div');
+      function choose(method) {
+        if (pending) return;
+        clearSensitive(); abandonEnrollment();
+        emailButton.className = method === 'email' ? 'primary' : 'secondary';
+        totpButton.className = method === 'totp' ? 'primary' : 'secondary';
+        emailButton.setAttribute('aria-pressed', String(method === 'email'));
+        totpButton.setAttribute('aria-pressed', String(method === 'totp'));
+        pane.replaceChildren(); message('');
+        if (method === 'email') renderEmailCode(pane, result.email);
+        else renderTotp(pane, result);
+      }
+      const emailButton = button('邮箱验证码', () => choose('email'));
+      const totpButton = button('验证器', () => choose('totp'));
+      tabs.append(emailButton, totpButton);
+      container.append(element('p', '选择方便的方式，完成其中一种即可。'), tabs, pane);
+      // Rendering happens inside run(), while normal user interactions stay locked.
+      emailButton.className = result.email.email_available ? 'primary' : 'secondary';
+      totpButton.className = result.email.email_available ? 'secondary' : 'primary';
+      emailButton.setAttribute('aria-pressed', String(!!result.email.email_available));
+      totpButton.setAttribute('aria-pressed', String(!result.email.email_available));
+      if (result.email.email_available) renderEmailCode(pane, result.email);
+      else renderTotp(pane, result);
+    });
+  }
+  function renderEmailCode(container, settings) {
+    container.append(element('p', `验证码会发送到 ${backend.getSession()?.user.email || '你的登录邮箱'}。`));
+    if (!settings.email_available) {
+      container.append(element('p', '邮箱验证码暂时不可用。请先使用邮箱和密码登录；仍不可用时，可以使用验证器或联系站长。')); return;
+    }
+    container.append(element('small', settings.email_enabled ? '验证码 5 分钟内有效。验证通过后即可继续。' : '首次验证成功后会启用邮箱二次验证，以后的登录也可以任选邮箱或已绑定的验证器。'));
+    const send = button('发送邮箱验证码', () => run(() => backend.api('security.email.send'), data => {
+      emailChallenge = data.challenge_id;
+      send.textContent = '重新发送验证码';
+      message('验证码已发送，5 分钟内有效；如未收到，请检查垃圾邮件。重新发送需间隔 60 秒。');
+      code.focus();
+    }));
+    const form = element('form', undefined, 'auth-form');
+    const code = input(form, '邮箱收到的 6 位验证码', 'email-code', { autocomplete: 'one-time-code', minLength: 6, maxLength: 6 });
+    code.inputMode = 'numeric'; code.pattern = '[0-9]{6}';
+    submit(form, '验证邮箱验证码', () => {
+      if (!emailChallenge) { message('请先发送邮箱验证码。'); return; }
+      const value = code.value.trim(); code.value = '';
+      return run(() => backend.api('security.email.verify', { challenge_id: emailChallenge, code: value }), async () => {
+        emailChallenge = null; mfaView = false; await backend.refresh(); render(); message('邮箱二次验证已完成。');
+      });
+    });
+    container.append(send, form);
+  }
+  function renderTotp(container, result) {
+      if (result.assurance.currentLevel === 'aal2') { container.append(element('p', '本次登录已通过验证器验证。')); return; }
       if (result.verified.length) {
         factorId = result.verified[0].id;
         container.append(element('p', '输入验证器中的 6 位验证码。'));
@@ -241,14 +307,13 @@ export async function initAuth({ onChange = () => {} } = {}) {
           });
         }));
       }
-    });
   }
   function renderMfaCode(container) {
     const form = element('form', undefined, 'auth-form');
     const code = input(form, '6 位验证码', 'totp', { autocomplete: 'one-time-code', minLength: 6, maxLength: 6 }); code.inputMode = 'numeric'; code.pattern = '[0-9]{6}';
     submit(form, '验证', () => {
       const value = code.value.trim(); code.value = '';
-      return run(() => backend.client.auth.mfa.challengeAndVerify({ factorId, code: value }), async () => { enrolled = null; factorId = null; await backend.refresh(); render(); message(backend.getSession()?.mfaRequired ? '验证状态还未更新，请刷新账户状态后再试。' : '二次验证已完成。'); });
+      return run(() => backend.client.auth.mfa.challengeAndVerify({ factorId, code: value }), async () => { enrolled = null; factorId = null; mfaView = false; await backend.refresh(); render(); message(backend.getSession()?.mfaRequired ? '验证状态还未更新，请刷新账户状态后再试。' : '二次验证已完成。'); });
     });
     container.append(form);
   }
@@ -266,7 +331,7 @@ export async function initAuth({ onChange = () => {} } = {}) {
       onChange: session => {
         onChange(session);
         // Do not replace a form while the user is typing or completing a request.
-        if (dialog.open && !pending && mode !== 'reset' && !recovery && !enrolled && !factorId && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !document.activeElement?.isContentEditable) render();
+        if (dialog.open && !pending && mode !== 'reset' && !recovery && !mfaView && !enrolled && !factorId && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !document.activeElement?.isContentEditable) render();
       },
       onAuthEvent: event => {
         if (event === 'PASSWORD_RECOVERY') { recovery = true; open(); }
@@ -274,13 +339,12 @@ export async function initAuth({ onChange = () => {} } = {}) {
         if (event === 'SIGNED_IN') sessionExpired=false;
         if (event === 'SESSION_EXPIRED') { sessionExpired=true; open(); message('登录已过期，请重新登录后继续。'); }
         if (event === 'MFA_REQUIRED') {
-          // Repeated me requests or token refreshes must not erase a TOTP form.
-          // The challenge uses Auth directly, so it works before profile access.
+          // Repeated requests or token refreshes must not erase either challenge.
           if (!dialog.open) open();
-          else if (!pending && !factorId && !enrolled) render();
+          else if (!pending && !mfaView && !factorId && !enrolled) render();
           message('请在账户安全里完成二次验证后继续。');
         }
-        if (event === 'SIGNED_OUT') { recovery = false; enrolled = null; factorId = null; mode = 'login'; if (dialog.open) render(); }
+        if (event === 'SIGNED_OUT') { recovery = false; enrolled = null; factorId = null; mfaView = false; emailChallenge = null; mode = 'login'; if (dialog.open) { render(); if (signedOutNotice) message(signedOutNotice); } signedOutNotice = ''; }
       }
     });
     const initialized = await backend.client.auth.initialize();

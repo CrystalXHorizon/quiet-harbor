@@ -34,10 +34,12 @@ function apiError(body, status) {
   const fallbacks = { 400: '请求内容不正确，请检查后重试。', 401: '登录已过期，请重新登录。', 403: '当前账户没有此操作权限。', 404: '内容不存在或已不可用。', 429: '操作较频繁或已达到用量上限，请稍后再试。', 503: '服务尚未配置完成，请稍后再试。' };
   const messages = { mfa_required:'请先完成二次验证。', admission_required:'账户尚未通过加入审核。', quota_exceeded:'今日 AI 调用额度已用完，请明天再试。', rate_limit:'操作较频繁，请稍后再试。', not_configured:'AI 服务尚未启用，请联系站长。', provider_failed:'AI 服务暂时无法完成请求，请稍后再试。', muted:'账户当前处于禁言状态。', invite_invalid:'邀请码无效、已停用、过期或已用完。', content_changed:'内容已更新，请刷新后重试。', self_moderation:'请由另一位管理员审核你发布的内容。', duplicate:'已经提交过，请等待处理。', key_required:'更换供应商地址或协议时，请重新填写 API Key。' };
   const message = messages[body?.code] || fallbacks[status] || '服务暂时不可用，请稍后重试。';
-  const error = new Error(message);
+  const securityMessages={email_mfa_unavailable:'邮箱验证码尚未配置完成，请使用验证器或联系站长。',email_send_failed:'验证码邮件暂时没能发送，请稍后重试或使用验证器。',email_code_invalid:'验证码不正确、已过期或尝试次数已用完，请重新获取。',password_required:'请先用邮箱和密码重新登录，再使用邮箱二次验证。'};
+  const error = new Error(securityMessages[body?.code]||message);
   error.isBackendError = true;
   error.code = typeof body?.code === 'string' ? body.code.slice(0, 60) : 'request_failed';
   error.status = status;
+  if (error.code === 'mfa_required' && typeof body?.totp_enabled === 'boolean') error.totpEnabled = body.totp_enabled;
   return error;
 }
 
@@ -107,7 +109,7 @@ export function createBackendClient(config, { createClient, fetchImpl = fetch, o
           epoch++;
           refreshVersion++;
           for (const active of pending) if (active !== controller) active.abort();
-          session = { user: safeUser(tokenSession.user), profile: null, ai: null, usage: null, mfaRequired: true, error: problem.message };
+          session = { user: safeUser(tokenSession.user), profile: null, ai: null, usage: null, mfaRequired: true, error: problem.message, ...(typeof problem.totpEnabled === 'boolean' ? { totpEnabled: problem.totpEnabled } : {}) };
           notify();
           onAuthEvent('MFA_REQUIRED');
         }
@@ -135,7 +137,7 @@ export function createBackendClient(config, { createClient, fetchImpl = fetch, o
     try {
       const details = await api('me');
       if (disposed || requestEpoch !== epoch || requestRevision !== refreshVersion) return session;
-      session = { user, profile: details.profile || null, ai: details.ai || null, usage: details.usage || null, application: details.application || null };
+      session = { user, profile: details.profile || null, ai: details.ai || null, usage: details.usage || null, application: details.application || null, ...(details.security ? { security: details.security } : {}) };
     } catch (error) {
       if (disposed || requestEpoch !== epoch || requestRevision !== refreshVersion || error.name === 'AbortError') return session;
       session = { user, profile: null, ai: null, usage: null, error: error.message, ...(error.code === 'mfa_required' ? { mfaRequired: true } : {}) };

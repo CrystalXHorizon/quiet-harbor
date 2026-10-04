@@ -8,6 +8,7 @@ test('real Postgres migration: deny browser access, authorize roles, isolate rev
   // Supabase owns these objects in production; only its minimal surface is mocked.
   await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;
    create schema auth;create table auth.users(id uuid primary key,email text,raw_user_meta_data jsonb default '{}');
+   create table auth.sessions(id uuid primary key,user_id uuid references auth.users(id) on delete cascade,not_after timestamptz);
    create function public.rls_auto_enable() returns event_trigger language plpgsql security definer as $$ begin return;end $$;`);
   const migrations=new URL('../supabase/migrations/',import.meta.url);
   for(const file of (await readdir(migrations)).filter(f=>f.endsWith('.sql')).sort())await db.exec(await readFile(new URL(file,migrations),'utf8'));

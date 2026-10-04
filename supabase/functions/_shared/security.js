@@ -6,6 +6,8 @@ export class ApiError extends Error {
 const messages={
  unauthorized:'登录已失效，请重新登录。', forbidden:'当前账户没有这项操作的权限。', admission_required:'账户尚未通过申请审核。', invite_invalid:'邀请码无效、已停用、过期或已用完。',
  mfa_required:'请先完成两步验证，再继续使用账户。', muted:'账户暂时不能发布内容，请联系管理员。',
+ email_mfa_unavailable:'邮箱验证码尚未配置完成，请使用验证器或联系站长。', email_send_failed:'验证码邮件暂时没能发送，请稍后重试或使用验证器。',
+ email_code_invalid:'验证码不正确、已过期或尝试次数已用完，请重新获取。', password_required:'请先用邮箱和密码重新登录，再使用邮箱二次验证。',
  not_found:'内容不存在，或当前无法访问。', validation:'填写的内容或参数不符合要求，请检查后重试。',
  rate_limit:'操作太频繁了，请稍后再试。', quota_exceeded:'今日 AI 使用额度已用完，请明天再来。',
  not_configured:'AI 服务尚未启用，请联系站长。', provider_failed:'AI 服务暂时无法完成请求，请稍后再试。',
@@ -16,11 +18,11 @@ const messages={
 };
 export function errorResponse(error) {
  const code=error instanceof ApiError && Object.hasOwn(messages,error.code)?error.code:'internal';
- return {body:{error:messages[code],code},status:code==='internal'?500:error.status};
+ return {body:{error:messages[code],code,...(code==='mfa_required'&&typeof error.totpEnabled==='boolean'?{totp_enabled:error.totpEnabled}:{})},status:code==='internal'?500:error.status};
 }
 export function rpcError(error) {
  const code=String(error?.message||'');
- if(Object.hasOwn(messages,code))return new ApiError(code,['forbidden','admission_required','muted','mfa_required','self_moderation'].includes(code)?403:code==='unauthorized'?401:code==='not_found'?404:['rate_limit','quota_exceeded'].includes(code)?429:code==='not_configured'?503:400);
+ if(Object.hasOwn(messages,code))return new ApiError(code,['forbidden','admission_required','muted','mfa_required','self_moderation','password_required'].includes(code)?403:code==='unauthorized'?401:code==='not_found'?404:['rate_limit','quota_exceeded'].includes(code)?429:code==='not_configured'?503:400);
  if(error?.code==='23505')return new ApiError('duplicate',409);
  if(['23502','23503','23514','22P02','22003'].includes(error?.code))return new ApiError('validation');
  return new ApiError('internal',500);
@@ -76,12 +78,32 @@ export function verifiedAal2(token,userId) {
  try{const part=token.split('.')[1];const claims=JSON.parse(atob(part.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(part.length/4)*4,'=')));return claims.sub===userId&&claims.aal==='aal2';}catch{return false;}
 }
 
+// These claims are trustworthy only after Auth validated this same token.
+export function verifiedPasswordSession(token,userId) {
+ try{
+  const part=token.split('.')[1];const claims=JSON.parse(atob(part.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(part.length/4)*4,'=')));
+  if(claims.sub!==userId||typeof claims.session_id!=='string'||!uuid.test(claims.session_id))return null;
+  return {id:claims.session_id,password:Array.isArray(claims.amr)&&claims.amr.some(item=>item.method==='password')};
+ }catch{return null;}
+}
+
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ACTIONS=new Set(['me','profile.update','posts.list','posts.get','posts.save','posts.delete','posts.comments','comments.save','comments.delete','bookmarks.toggle','blocks.toggle','blocks.list','reports.create','appeals.create','admin.queue','admin.moderate','admin.users','admin.user','admin.audit','admin.ai.get','admin.ai.save','admin.ai.test','admin.usage','chat']);
 export function validateAction(input) {
  if(!ACTIONS.has(input.action))throw new ApiError('validation');
  const p={...input};delete p.action;
- for(const key of ['id','post_id','comment_id','user_id'])if(p[key]!==undefined&&(typeof p[key]!=='string'||!uuid.test(p[key])))throw new ApiError('validation');
+ for(const key of ['id','post_id','comment_id','user_id','challenge_id'])if(p[key]!==undefined&&(typeof p[key]!=='string'||!uuid.test(p[key])))throw new ApiError('validation');
+ if(input.action.startsWith('security.')){
+  if(input.action==='security.password.update'){
+   if(typeof p.password!=='string'||p.password.length<8||p.password.length>128)throw new ApiError('validation');
+   return {password:p.password};
+  }
+  if(input.action==='security.email.verify'){
+   if(typeof p.code!=='string'||!/^\d{6}$/.test(p.code)||!p.challenge_id)throw new ApiError('validation');
+   return {code:p.code,challenge_id:p.challenge_id};
+  }
+  return {};
+ }
  const required={
   'profiles.get':['user_id'],'notifications.read':['id'],'bookmarks.remove':['post_id'],'posts.get':['id'],'posts.save':['title','body','category','preference','submit'],'posts.delete':['id'],'posts.comments':['id','open'],
   'comments.save':['post_id','body'],'comments.delete':['id'],'bookmarks.toggle':['post_id'],'blocks.toggle':['user_id'],'reports.create':['reason'],
@@ -101,10 +123,20 @@ export function validateAction(input) {
  for(const [key,allowed] of [['category',['share','advice','progress']],['preference',['listen','advice']],['status',input.action==='admin.application.review'?['approved','rejected']:['active','muted','banned']],['role',['member','moderator']]])if(p[key]!==undefined&&!allowed.includes(p[key]))throw new ApiError('validation');
  if(['reports.create','appeals.create'].includes(input.action)&&Number(!!p.post_id)+Number(!!p.comment_id)!==1)throw new ApiError('validation');
  if(input.action==='admin.user'&&p.role===undefined&&p.status===undefined)throw new ApiError('validation');
+ if(p.duration_seconds!==undefined||Object.hasOwn(p,'status_until')){
+  if(input.action!=='admin.user'||!['muted','banned'].includes(p.status)||(p.duration_seconds!==undefined&&Object.hasOwn(p,'status_until')))throw new ApiError('validation');
+  if(p.duration_seconds!==undefined&&(!Number.isInteger(p.duration_seconds)||p.duration_seconds<60||p.duration_seconds>31536000))throw new ApiError('validation');
+  if(Object.hasOwn(p,'status_until')&&p.status_until!==null){
+   if(typeof p.status_until!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(p.status_until))throw new ApiError('validation');
+   const until=Date.parse(p.status_until),now=Date.now();
+   if(!Number.isFinite(until)||until<=now||until>now+31536000000)throw new ApiError('validation');
+  }
+ }
+ delete p.status_started_at;
  for(const [key,max] of [['user_daily_limit',1000],['global_daily_limit',100000]])if(p[key]!==undefined&&(!Number.isInteger(p[key])||p[key]<1||p[key]>max))throw new ApiError('validation');
  if(p.moderation_model!==undefined&&(typeof p.moderation_model!=='string'||p.moderation_model.length>160||/\s/.test(p.moderation_model)))throw new ApiError('validation');
  // Privileged values are exclusively manufactured server-side.
- delete p.encrypted_key;delete p.key_last4;delete p.actor;delete p.aal2;delete p.code_hash;delete p.code_hint;
+ delete p.encrypted_key;delete p.key_last4;delete p.actor;delete p.aal2;delete p.code_hash;delete p.code_hint;delete p.auth_session;delete p.native_mfa;
  const admissionRequired={'admission.apply':['reason'],'admission.redeem':['code'],'admin.application.review':['id','status','reason'],'admin.invites.create':['label','max_uses'],'admin.invites.update':['id','enabled']}[input.action]||[];
  if(admissionRequired.some(key=>p[key]===undefined))throw new ApiError('validation');
  if(p.code!==undefined&&(typeof p.code!=='string'||!/^[A-Za-z0-9-]{12,80}$/.test(p.code.trim())))throw new ApiError('validation');
@@ -114,6 +146,7 @@ export function validateAction(input) {
  return p;
 }
 for(const action of ['admission.apply','admission.redeem','admin.applications','admin.application.review','admin.invites.list','admin.invites.create','admin.invites.update','personal.overview','personal.comments','personal.appeals','personal.bookmarks','notifications.list','notifications.read','notifications.read_all','profiles.get','bookmarks.remove'])ACTIONS.add(action);
+for(const action of ['security.mfa.status','security.email.send','security.email.verify','security.email.disable','security.password.update'])ACTIONS.add(action);
 export function generateInviteCode(){return Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('');}
 ACTIONS.add('admin.purge');
 export async function hashInviteCode(code){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code.trim().toUpperCase()))),x=>x.toString(16).padStart(2,'0')).join('');}

@@ -12,6 +12,7 @@ test('admission migration preserves members, gates pending accounts, reviews and
  const create=async(id,metadata={})=>db.query('insert into auth.users(id,raw_user_meta_data) values($1,$2::jsonb)',[id,JSON.stringify(metadata)]);
  try{
   await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key,email text,raw_user_meta_data jsonb default '{}');`);
+  await db.exec('create table auth.sessions(id uuid primary key,user_id uuid references auth.users(id) on delete cascade,not_after timestamptz);');
   const directory=new URL('../supabase/migrations/',import.meta.url);
   const migrations=(await readdir(directory)).filter(f=>f.endsWith('.sql')).sort();
   await db.exec(await readFile(new URL(migrations.shift(),directory),'utf8'));
@@ -24,7 +25,7 @@ test('admission migration preserves members, gates pending accounts, reviews and
   for(const action of ['posts.list','posts.get','posts.save','profile.update','admin.users','admin.invites.list','blocks.list'])await assert.rejects(()=>call(applicant,action),/admission_required/);
   await assert.rejects(()=>db.query('select qh_reserve_ai($1)',[applicant]),/admission_required/);
   for(const role of ['anon','authenticated']){
-   const permissions=(await db.query(`select has_table_privilege($1,'qh_applications','select') a,has_table_privilege($1,'qh_invites','select') b,has_function_privilege($1,'qh_action(uuid,text,jsonb,boolean)','execute') c`,[role])).rows[0];
+   const permissions=(await db.query(`select has_table_privilege($1,'qh_applications','select') a,has_table_privilege($1,'qh_invites','select') b,has_function_privilege($1,'qh_action(uuid,text,jsonb,boolean,uuid)','execute') c`,[role])).rows[0];
    assert.deepEqual(permissions,{a:false,b:false,c:false});
   }
   assert.equal((await db.query("select has_function_privilege('service_role','qh_action_admitted(uuid,text,jsonb,boolean)','execute') allowed")).rows[0].allowed,false);

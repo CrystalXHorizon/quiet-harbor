@@ -4,7 +4,8 @@ import {providerEnv} from './providers.js';
 import {resolveSupabaseKeys} from './supabase-keys.js';
 import {runModeration,POLICY_VERSION} from './moderation.js';
 import {generateInviteCode,hashInviteCode} from './security.js';
-import {ApiError,errorResponse,rpcError,allowedOrigins,safeProviderConfig,validateKey,encryptKey,decryptKey,readJson,verifiedAal2,validateAction} from './security.js';
+import {ApiError,errorResponse,rpcError,allowedOrigins,safeProviderConfig,validateKey,encryptKey,decryptKey,readJson,verifiedAal2,verifiedPasswordSession,validateAction} from './security.js';
+import {emailMfaConfigured,generateEmailCode,emailCodeHash,sendEmailCode} from './email-mfa.js';
 
 export function moderationConnection(job, allowedHosts) {
  if(!job || !['post','comment'].includes(job.kind) || !job.content || typeof job.content.body!=='string' || !job.context || !job.encrypted_key)throw new ApiError('internal',503);
@@ -14,14 +15,14 @@ export function moderationConnection(job, allowedHosts) {
 export function createApiHandler({env,fetchImpl=fetch}) {
  const origins=allowedOrigins(env.ALLOWED_ORIGINS);
  const {publishableKey,secretKey}=resolveSupabaseKeys(env);
- async function internalFetch(path,body,token) {
+ async function internalFetch(path,body,token,method) {
   const service=token===undefined;
   const key=service?secretKey:publishableKey;
   const headers={apikey:key,'Content-Type':'application/json'};
   if(!env.SUPABASE_URL||!headers.apikey)throw new ApiError('not_configured',503);
   // Opaque secret keys authenticate through apikey; only JWTs use Bearer.
   if(!service||!key.startsWith('sb_secret_'))headers.Authorization=`Bearer ${service?key:token}`;
-  let response;try{response=await fetchImpl(env.SUPABASE_URL.replace(/\/$/,'')+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new ApiError('internal',503);}
+  let response;try{response=await fetchImpl(env.SUPABASE_URL.replace(/\/$/,'')+path,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new ApiError('internal',503);}
   if(response.status===204)return null;
   let data;try{data=await response.json();}catch{throw new ApiError('internal',503);}
   if(!response.ok){if(!service)throw new ApiError('unauthorized',401);throw rpcError(data);}
@@ -51,12 +52,50 @@ export function createApiHandler({env,fetchImpl=fetch}) {
    const user=await internalFetch('/auth/v1/user',undefined,token);
    if(!user.id||!user.email_confirmed_at)throw new ApiError('unauthorized',401);
    const aal2=verifiedAal2(token,user.id);
-   // Once TOTP is enrolled, a password-only session may challenge/recover through
-   // Auth but must not read private application data. Enrollment state comes from
-   // the verified Auth response, never from client metadata or the JSON request.
-   if(Array.isArray(user.factors)&&user.factors.some(f=>f.factor_type==='totp'&&f.status==='verified')&&!aal2)throw new ApiError('mfa_required',403);
+   const passwordSession=verifiedPasswordSession(token,user.id);
+   const authSession=passwordSession?.id||null;
    const input=await readJson(request);const payload=validateAction(input);
-   const rpc=(action,payload={})=>internalFetch('/rest/v1/rpc/qh_action',{actor:user.id,action,payload,aal2});
+   const emailRpc=(operation,payload={})=>internalFetch('/rest/v1/rpc/qh_email_mfa',{actor:user.id,auth_session:authSession,operation,payload});
+   const emailStatus=authSession?await emailRpc('status'):{email_enabled:false,email_verified:false};
+   const mfaVerified=aal2||emailStatus.email_verified===true;
+   // A session grant is bound to the signed session ID and current verified email.
+   // Challenge endpoints remain available while private application data is gated.
+   if(input.action.startsWith('security.')){
+    let result;
+    if(input.action==='security.mfa.status'){
+     result={...emailStatus,verified:mfaVerified,totp_enabled:Array.isArray(user.factors)&&user.factors.some(f=>f.factor_type==='totp'&&f.status==='verified'),
+      email_available:emailMfaConfigured(env)&&!!passwordSession?.password};
+    }else if(input.action==='security.password.update'){
+     if(!mfaVerified)throw new ApiError('mfa_required',403);
+     await emailRpc('authorize_password',{native_mfa:aal2});
+     // Revoke the application grants BEFORE changing Auth credentials. If Auth
+     // fails, the user can verify again; stale proof cannot survive a password reset.
+     await emailRpc('revoke_sessions',{native_mfa:aal2});
+     await internalFetch(`/auth/v1/admin/users/${user.id}`,{password:payload.password},undefined,'PUT');
+     result={ok:true,sign_out:true};
+    }else if(input.action==='security.email.disable'){
+     result=await emailRpc('disable',{native_mfa:aal2});
+    }else{
+     // A passwordless email sign-in must not count as two independent steps.
+     if(!passwordSession?.password)throw new ApiError('password_required',403);
+     if(!emailMfaConfigured(env))throw new ApiError('email_mfa_unavailable',503);
+     if(input.action==='security.email.send'){
+      const code=generateEmailCode(),challengeId=crypto.randomUUID();
+      const codeHash=await emailCodeHash(env,user.id,authSession,challengeId,code);
+      result=await emailRpc('start',{challenge_id:challengeId,code_hash:codeHash,email:user.email});
+      try{await sendEmailCode(env,user.email,code,challengeId,fetchImpl);}catch(error){await emailRpc('cancel',{challenge_id:challengeId}).catch(()=>{});throw error;}
+     }else{
+      const codeHash=await emailCodeHash(env,user.id,authSession,payload.challenge_id,payload.code);
+      result=await emailRpc('verify',{challenge_id:payload.challenge_id,code_hash:codeHash});
+      if(result.error_code)throw new ApiError(result.error_code,400);
+     }
+    }
+    return new Response(JSON.stringify(result),{status:200,headers});
+   }
+   const totpEnabled=Array.isArray(user.factors)&&user.factors.some(f=>f.factor_type==='totp'&&f.status==='verified');
+   if((emailStatus.email_enabled||totpEnabled)&&!mfaVerified){const problem=new ApiError('mfa_required',403);problem.totpEnabled=totpEnabled;throw problem;}
+   // SQL independently rechecks the email grant when authorizing each operation.
+   const rpc=(action,payload={})=>internalFetch('/rest/v1/rpc/qh_action',{actor:user.id,action,payload,aal2,auth_session:authSession});
    let billingError=null;
    function chargedFetch(kind,firstReserved=true) {
     let first=true;
@@ -84,7 +123,7 @@ export function createApiHandler({env,fetchImpl=fetch}) {
    }else if(input.action==='admin.ai.save'||input.action==='admin.ai.test'){
     // Permission must be checked before reading stored ciphertext or using a supplied key.
     await rpc('admin.ai.get');
-    if(!aal2)throw new ApiError('mfa_required',403);
+    if(!mfaVerified)throw new ApiError('mfa_required',403);
     const config=safeProviderConfig(payload.config,env.AI_ALLOWED_HOSTS);
     const current=await settings();
     const sameEndpoint=current.config?.base===config.base&&current.config?.protocol===config.protocol;
@@ -104,7 +143,7 @@ export function createApiHandler({env,fetchImpl=fetch}) {
      result=await rpc('admin.ai.save',securePayload);
     }
    }else if(input.action==='admin.invites.create'){
-    await rpc('admin.invites.list');if(!aal2)throw new ApiError('mfa_required',403);
+    await rpc('admin.invites.list');if(!mfaVerified)throw new ApiError('mfa_required',403);
     const code=(payload.code||generateInviteCode()).trim().toUpperCase();
     const {code:ignored,...safe}=payload;
     result=await rpc(input.action,{...safe,code_hash:await hashInviteCode(code),code_hint:code.slice(-4)});
@@ -113,6 +152,7 @@ export function createApiHandler({env,fetchImpl=fetch}) {
     result=await rpc(input.action,{code_hash:await hashInviteCode(payload.code)});
     if(result.error_code==='invite_invalid')throw new ApiError('invite_invalid');
    }else result=await rpc(input.action,payload);
+   if(input.action==='me')result={...result,security:{emailVerified:emailStatus.email_verified===true,nativeVerified:aal2}};
    if(['posts.save','comments.save'].includes(input.action)&&result?.moderation_job_id){
     const job_id=result.moderation_job_id;
     let outcome={decision:'error',reason:'自动审核暂时未完成，已保留待人工审核。',rule_ids:[],policy_version:POLICY_VERSION};

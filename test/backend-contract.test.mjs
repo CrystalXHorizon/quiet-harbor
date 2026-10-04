@@ -10,6 +10,7 @@ test('real SQL RPC output feeds the Edge gateway: me, settings, reservations, cl
  const db=new PGlite();const master=Buffer.alloc(32,9).toString('base64');
  try{
   await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key,email text,raw_user_meta_data jsonb default '{}');`);
+  await db.exec('create table auth.sessions(id uuid primary key,user_id uuid references auth.users(id) on delete cascade,not_after timestamptz);');
   const directory=new URL('../supabase/migrations/',import.meta.url);
   for(const f of (await readdir(directory)).filter(f=>f.endsWith('.sql')).sort())await db.exec(await readFile(new URL(f,directory),'utf8'));
   await db.query('insert into auth.users(id,email) values($1,$2)',[id,'contract@example.test']);
@@ -17,7 +18,7 @@ test('real SQL RPC output feeds the Edge gateway: me, settings, reservations, cl
   const ciphertext=await encryptKey('contract-secret-key',master,config);
   await db.query("update qh_ai_settings set config=$1,encrypted_key=$2,enabled=true,moderation_model='review-model'",[config,ciphertext]);
   const rpc=async(name,p)=>{
-   const keys={qh_action:['actor','action','payload','aal2'],qh_reserve_ai:['actor'],qh_reserve_model:['actor','kind'],qh_record_ai_call:['actor','kind','start_turn'],qh_claim_moderation:['actor','job_id'],qh_complete_moderation:['actor','job_id','decision','reason','rule_ids','policy_version','model'],qh_backend_version:[]}[name];
+   const keys={qh_action:['actor','action','payload','aal2','auth_session'],qh_reserve_ai:['actor'],qh_reserve_model:['actor','kind'],qh_record_ai_call:['actor','kind','start_turn'],qh_claim_moderation:['actor','job_id'],qh_complete_moderation:['actor','job_id','decision','reason','rule_ids','policy_version','model'],qh_backend_version:[]}[name];
    assert.ok(keys,'unexpected RPC '+name);
    return (await db.query(`select public.${name}(${keys.map((_,i)=>'$'+(i+1)).join(',')}) value`,keys.map(k=>p[k]))).rows[0].value;
   };
@@ -49,6 +50,6 @@ test('real SQL RPC output feeds the Edge gateway: me, settings, reservations, cl
   assert.ok(changed.renamed_config);assert.equal(changed.config,undefined);assert.throws(()=>moderationConnection(changed,''));
   const settings=await handler(request({action:'admin.ai.get'}));assert.equal(settings.status,200);assert.equal((await settings.json()).key_set,true);
   const reserved=await rpc('qh_reserve_ai',{actor:id});assert.deepEqual(reserved.config,config);assert.deepEqual(reserved.encrypted_key,ciphertext);
-  const health=await handler(new Request('https://contract.supabase.co/functions/v1/api/health',{headers:{Origin:'https://site.example'}}));assert.equal(health.status,200);assert.equal((await health.json()).schema,'202610030005');
+  const health=await handler(new Request('https://contract.supabase.co/functions/v1/api/health',{headers:{Origin:'https://site.example'}}));assert.equal(health.status,200);assert.equal((await health.json()).schema,'202610040002');
  }finally{await db.close();}
 });
