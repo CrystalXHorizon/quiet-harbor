@@ -1,6 +1,6 @@
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
-const allowed=new Set(['index.html','community-rules.html','community-rules.css','style.css','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css','personal.js','personal.css','site-config.json','auth-bundle.js','auth-bundle.js.LEGAL.txt','chat-state.js','form-validation.js']);
+const allowed=new Set(['index.html','community-rules.html','community-rules.css','style.css','theme.css','theme.js','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css','personal.js','personal.css','site-config.json','auth-bundle.js','auth-bundle.js.LEGAL.txt','chat-state.js','form-validation.js']);
 const security=JSON.parse(await readFile(new URL('../dist/security-headers.json',import.meta.url),'utf8'));
 for(const file of [...allowed].filter(f=>!f.endsWith('.LEGAL.txt')))await readFile(new URL('../dist/'+file,import.meta.url));
 const types={html:'text/html; charset=utf-8',css:'text/css; charset=utf-8',js:'text/javascript; charset=utf-8',json:'application/json',svg:'image/svg+xml',txt:'text/plain; charset=utf-8'};

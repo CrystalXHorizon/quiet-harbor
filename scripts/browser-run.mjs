@@ -8,4 +8,5 @@ try{
  await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('exit',()=>reject(new Error('Preview failed to start')));server.once('error',reject);});
  await run(['scripts/browser-check.cjs',base]);
  await run(['scripts/browser-audit.cjs',base]);
+ await run(['scripts/browser-theme.cjs',base]);
 }finally{server.kill();await run(['scripts/build.mjs']);}

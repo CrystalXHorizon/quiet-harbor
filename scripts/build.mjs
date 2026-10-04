@@ -7,7 +7,7 @@ import {contentSecurity} from '../public/content-security.js';
 
 const target=resolve('dist');
 await mkdir(target,{recursive:true});
-const files=['index.html','community-rules.html','community-rules.css','style.css','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css','personal.js','personal.css','chat-state.js','form-validation.js'];
+const files=['index.html','community-rules.html','community-rules.css','style.css','theme.css','theme.js','favicon.svg','app.js','safety.js','strategies.js','providers.js','community.js','community.css','personal.js','personal.css','chat-state.js','form-validation.js'];
 for(const file of files)await copyFile(resolve('public',file),resolve(target,file));
 const config=JSON.parse(await readFile('public/site-config.json','utf8'));
 if(process.env.PUBLIC_SUPABASE_URL)config.supabaseUrl=process.env.PUBLIC_SUPABASE_URL;
@@ -38,8 +38,10 @@ page=page.replace(/(<meta http-equiv="Content-Security-Policy" content=")[^"]+("
 await writeFile(resolve(target,'security-headers.json'),JSON.stringify({'Content-Security-Policy':csp+"; frame-ancestors 'none'",'X-Frame-Options':'DENY'},null,2)+'\n');
 // Header-capable static hosts can consume _headers; GitHub Pages ignores it.
 await writeFile(resolve(target,'_headers'),`/*\n  Content-Security-Policy: ${csp}; frame-ancestors 'none'\n  X-Frame-Options: DENY\n`);
-for(const css of ['style.css','community.css','personal.css'])page=page.replace(`href="./${css}"`,`href="./${css}?v=${digest(await readFile(resolve(target,css)))}"`);
+for(const css of ['style.css','community.css','personal.css','theme.css'])page=page.replace(`href="./${css}"`,`href="./${css}?v=${digest(await readFile(resolve(target,css)))}"`);
+const themeVersion=digest(await readFile(resolve(target,'theme.js')));
+page=page.replace('src="./theme.js"',`src="./theme.js?v=${themeVersion}"`);
 await writeFile(resolve(target,'index.html'),page);
 const rules=(await readFile(resolve(target,'community-rules.html'),'utf8')).replace('href="./community-rules.css"',`href="./community-rules.css?v=${digest(await readFile(resolve(target,'community-rules.css')))}"`);
-await writeFile(resolve(target,'community-rules.html'),rules);
+await writeFile(resolve(target,'community-rules.html'),rules.replace('src="./theme.js"',`src="./theme.js?v=${themeVersion}"`).replace('href="./theme.css"',`href="./theme.css?v=${digest(await readFile(resolve(target,'theme.css')))}"`));
 console.log(config.supabaseUrl?'Built configured frontend in dist/':'Built frontend in dist/ (backend not configured; local preview only)');
