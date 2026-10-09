@@ -6,6 +6,7 @@
 .qh-resolution-content{padding:1.15rem;background:var(--soft,var(--soft));border:1px solid var(--line,var(--line));border-radius:14px;margin:1rem 0}.qh-resolution-content h4{margin-top:0}.qh-review-reason summary{cursor:pointer;font-weight:600}.qh-admin-group .qh-actions{flex-wrap:wrap}
 
 .qh-muted,.qh-meta,.qh-rules p,.qh-button.tab{color:var(--muted)}.qh-button.qh-close{width:44px;height:44px;min-height:44px}
+.qh-audit-name{font-size:14px;line-height:1.6;margin:12px 0 4px;overflow-wrap:anywhere}
 @media(max-width:620px){.qh-button.text{min-height:44px;padding:8px 10px}}
 
 /* Post reading has its own quiet surface; the fixed header keeps close in reach. */

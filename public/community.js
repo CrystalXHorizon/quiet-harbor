@@ -270,10 +270,21 @@ export function initCommunity({api,onRequireAuth,getSession,onAccountRefresh}){
   for(const event of data.events||[]){
    const card=node('article',null,'qh-audit');
    const systemAction=event.action.startsWith('moderation.ai.')||event.action==='user.restriction.expired';
+   const actorName=event.actor_nickname||(event.actor_id?'账户已抹除':systemAction?'系统':'未记录');
+   const kinds={user:'账户',post:'帖子',comment:'回应',report:'举报',appeal:'申诉',invite:'邀请码',content:'内容',object:'对象'};
+   let targetName='无';
+   if(event.target_id){
+    const kind=kinds[event.target_kind]||'对象';
+    if(event.target_kind==='user')targetName=event.target_nickname||'账户（已抹除）';
+    else if(event.target_exists===false)targetName=`${kind}（已删除）`;
+    else targetName=[kind,event.target_label?`「${event.target_label}」`:'',event.target_nickname?`· ${event.target_nickname}`:''].filter(Boolean).join(' ');
+   }else if(['ai.save','ai.test','admin.ai.save','admin.ai.test'].includes(event.action))targetName='全站 AI 配置';
    card.append(
     node('strong',labels[event.action]||(event.action.startsWith('moderate.')?'人工内容审核':event.action.startsWith('user.')?'调整用户状态':event.action)),
     node('p',stamp(event.created_at),'qh-meta'),
-    node('p',event.actor_id?`操作者 ID：${event.actor_id}`:`操作者：${systemAction?'系统':'未记录'}`,'qh-meta'),
+    node('p',`操作者：${actorName}`,'qh-audit-name'),
+    ...(event.actor_id?[node('p',`操作者 ID：${event.actor_id}`,'qh-meta')]:[]),
+    node('p',`对象：${targetName}`,'qh-audit-name'),
     node('p',event.target_id?`对象 ID：${event.target_id}`:'对象 ID：无','qh-meta')
    );
    if(event.status_until)card.append(node('p',`限制到期时间：${restrictionStamp(event.status_until)}`,'qh-meta'));
