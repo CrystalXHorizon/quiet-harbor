@@ -257,7 +257,7 @@ export function initCommunity({api,onRequireAuth,getSession,onAccountRefresh}){
      setMessage(message,user.status==='active'?'账户调整已保存。':user.status_until?`账户调整已保存，将于 ${restrictionStamp(user.status_until)} 自动恢复正常。`:'账户调整已保存，永久限制需手动解除。');
     });
    });
-   card.append(form);if(isOwner())card.append(button('永久抹除账户',()=>reasonDialog('永久抹除这个账户？','将删除账户及其帖子、回应、审核快照、申请与通知，操作无法撤销。备份由站点保留策略处理。请填写经用户确认的删除原因。','admin.purge',{id:user.id},'账户及关联内容已抹除。',true,loadAdmin),'danger'));host.append(card);
+   card.append(form);if(isOwner())card.append(button('永久抹除账户',()=>reasonDialog('永久抹除这个账户？','将删除账户及其帖子、回应、审核快照、申请与通知，操作无法撤销。操作记录中的操作者和对象 ID 保留至 180 天期限结束，相关历史说明会清除。备份由站点保留策略处理。请填写经用户确认的删除原因。','admin.purge',{id:user.id},'账户及关联内容已抹除。',true,loadAdmin),'danger'));host.append(card);
   }
   if(!data.users?.length)host.append(node('p','暂时没有用户记录。','qh-muted'));
  }
@@ -265,7 +265,24 @@ export function initCommunity({api,onRequireAuth,getSession,onAccountRefresh}){
   async function act(saving){if(!form.reportValidity())return;let config;try{config=normalizeConfig({provider:provider.input.value,base:base.input.value,model:model.input.value,protocol:protocol.input.value,tokenField:tokens.input.value,jsonMode:json.input.checked});}catch(error){setMessage(message,error.message,true);return;}test.disabled=save.disabled=true;await perform(null,message,()=>api(saving?'admin.ai.save':'admin.ai.test',{config,...(key.input.value.trim()?{key:key.input.value.trim()}:{}),...(saving?{enabled:enabled.input.checked,moderation_model:moderationModel.input.value.trim(),user_daily_limit:Number(userLimit.input.value),global_daily_limit:Number(globalLimit.input.value)}:{})}),async result=>{if(saving){key.input.value='';setMessage(message,'AI 配置已保存。');await onAccountRefresh?.();}else setMessage(message,result.message||'连接测试通过。');});test.disabled=save.disabled=false;}
  }
  function renderUsage(host,data){host.append(node('p',`${data.today||'今日'}的用量按 UTC 日界线统计。聊天、社区审核和连接测试共享模型调用额度；每次供应商请求前预留一次，失败或取消也计入。`,'qh-muted'));const grid=node('div',null,'qh-stats');for(const [label,value] of [['调用预留总数',data.total??0],['已发起供应商调用',data.provider_calls??0],['聊天轮次',data.chat_turns??0],['社区审核预留',data.moderation_used??0],['全站每日调用上限',data.global_daily_limit??'—'],['每人每日调用上限',data.user_daily_limit??'—']]){const card=node('div',null,'qh-stat');card.append(node('span',label),node('strong',value));grid.append(card);}host.append(grid,node('h2','用户模型调用预留'));for(const user of data.users||[]){const row=node('div',null,'qh-list-row');row.append(node('span',user.nickname||'社区成员'),node('strong',`${user.used} 次`));host.append(row);}if(!data.users?.length)host.append(node('p','今天还没有用量记录。','qh-muted'));host.append(button('刷新用量',loadAdmin));}
- function renderAudit(host,data){const labels={'ai.save':'更新 AI 配置','ai.test':'测试 AI 连接','posts.delete':'删除帖子','comments.delete':'删除回应','admin.purge':'抹除账户','moderation.ai.approve':'AI 审核通过','moderation.ai.reject':'AI 审核退回','moderation.ai.review':'AI 转人工复核','moderation.ai.error':'AI 审核失败','admission.approved':'通过加入申请','admission.rejected':'拒绝加入申请','invite.create':'创建邀请码','invite.update':'调整邀请码','admin.moderate':'内容审核','admin.user':'调整用户','user.restriction.expired':'限制到期自动解除','admin.ai.save':'更新 AI 配置','admin.ai.test':'测试 AI 连接'};for(const event of data.events||[]){const card=node('article',null,'qh-audit');card.append(node('strong',labels[event.action]||(event.action.startsWith('moderate.')?'人工内容审核':event.action.startsWith('user.')?'调整用户状态':event.action)),node('p',`${stamp(event.created_at)} · 操作者 ${event.actor_id||'系统'}`,'qh-meta'));if(event.target_id)card.append(node('p',`对象：${event.target_id}`,'qh-meta'));if(event.status_until)card.append(node('p',`限制到期时间：${restrictionStamp(event.status_until)}`,'qh-meta'));else if(/\.(muted|banned)$/.test(event.action))card.append(node('p','限制期限：永久','qh-meta'));if(event.reason)card.append(node('p',event.reason));host.append(card);}if(!data.events?.length)host.append(node('p','目前没有管理操作记录。','qh-muted'));}
+ function renderAudit(host,data){
+  const labels={'ai.save':'更新 AI 配置','ai.test':'测试 AI 连接','posts.delete':'删除帖子','comments.delete':'删除回应','admin.purge':'抹除账户','moderation.ai.approve':'AI 审核通过','moderation.ai.reject':'AI 审核退回','moderation.ai.review':'AI 转人工复核','moderation.ai.error':'AI 审核失败','admission.approved':'通过加入申请','admission.rejected':'拒绝加入申请','invite.create':'创建邀请码','invite.update':'调整邀请码','admin.moderate':'内容审核','admin.user':'调整用户','user.restriction.expired':'限制到期自动解除','admin.ai.save':'更新 AI 配置','admin.ai.test':'测试 AI 连接'};
+  for(const event of data.events||[]){
+   const card=node('article',null,'qh-audit');
+   const systemAction=event.action.startsWith('moderation.ai.')||event.action==='user.restriction.expired';
+   card.append(
+    node('strong',labels[event.action]||(event.action.startsWith('moderate.')?'人工内容审核':event.action.startsWith('user.')?'调整用户状态':event.action)),
+    node('p',stamp(event.created_at),'qh-meta'),
+    node('p',event.actor_id?`操作者 ID：${event.actor_id}`:`操作者：${systemAction?'系统':'未记录'}`,'qh-meta'),
+    node('p',event.target_id?`对象 ID：${event.target_id}`:'对象 ID：无','qh-meta')
+   );
+   if(event.status_until)card.append(node('p',`限制到期时间：${restrictionStamp(event.status_until)}`,'qh-meta'));
+   else if(/\.(muted|banned)$/.test(event.action))card.append(node('p','限制期限：永久','qh-meta'));
+   if(event.reason)card.append(node('p',event.reason));
+   host.append(card);
+  }
+  if(!data.events?.length)host.append(node('p','目前没有管理操作记录。','qh-muted'));
+ }
  function reset(){epoch++;listTicket++;adminTicket++;closeDialogs();community.replaceChildren();admin.replaceChildren();filter={scope:'all',category:''};adminTab='queue';adminPage=0;}
  return {showCommunity,showAdmin,reset,openPost,compose,showBlocks,appealPost:(id,after)=>reasonDialog('提交申诉','说明你希望复核的原因。','appeals.create',{post_id:id},'申诉已提交，管理员会复核。',true,after),appealComment:(id,after)=>reasonDialog('回应申诉','说明你希望复核的原因。','appeals.create',{comment_id:id},'申诉已提交，管理员会复核。',true,after),deleteComment:(id,after)=>reasonDialog('删除这条回应？','删除后会从社区移除，这一步不能在页面中撤销。','comments.delete',{id},'回应已删除。',false,after)};
 }

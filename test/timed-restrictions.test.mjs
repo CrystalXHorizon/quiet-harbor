@@ -26,13 +26,14 @@ test('real SQL restrictions expire across account, community, AI, MFA and mainte
    create table auth.sessions(id uuid primary key,user_id uuid references auth.users(id) on delete cascade,not_after timestamptz);`);
   const directory=new URL('../supabase/migrations/',import.meta.url);
   const files=(await readdir(directory)).filter(f=>f.endsWith('.sql')).sort();
-  for(const f of files.filter(f=>!f.startsWith('202610040002')))await db.exec(await readFile(new URL(f,directory),'utf8'));
+  for(const f of files.filter(f=>f<'202610040002'))await db.exec(await readFile(new URL(f,directory),'utf8'));
   for(const [id,role] of [[owner,'owner'],[mod,'moderator'],[member,'member'],[pending,'member']]){
    await db.query('insert into auth.users(id,email) values($1,$2)',[id,`${role}-${id}@example.invalid`]);
    await db.query("update qh_profiles set role=$2,admission_status=$3 where id=$1",[id,role,id===pending?'pending':'approved']);
   }
   await db.query("update qh_profiles set status='banned' where id=$1",[member]);
   await db.exec(await readFile(new URL('202610040002_timed_restrictions.sql',directory),'utf8'));
+  for(const f of files.filter(f=>f>'202610040002_timed_restrictions.sql'))await db.exec(await readFile(new URL(f,directory),'utf8'));
   assert.equal((await profile()).status_until,null,'legacy bans remain permanent');
   assert.equal((await call(member,'me')).profile.status,'banned');
   await adjustment('active');
