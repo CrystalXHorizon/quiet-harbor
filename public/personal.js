@@ -1,5 +1,5 @@
 import {chineseValidation} from './form-validation.js';
-const TABS={posts:'我的帖子',replies:'我的回复',bookmarks:'我的收藏',appeals:'我的申诉',notifications:'通知',settings:'个人设置'};
+const TABS={posts:['我的帖子','帖子'],replies:['我的回复','回复'],bookmarks:['我的收藏','收藏'],appeals:['我的申诉','申诉'],notifications:['通知','通知'],settings:['个人设置','设置']};
 const STATUSES={draft:'草稿',pending:'待审核',published:'已发布',rejected:'未通过',hidden:'已隐藏',open:'待处理',resolved:'已处理'};
 const AVATARS={harbor:'⚓ 港湾',leaf:'☘ 绿叶',moon:'☾ 月亮',sun:'☀ 太阳',wave:'≈ 海浪',star:'☆ 星星'};
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
@@ -16,7 +16,7 @@ export function initPersonal({api,getSession,onRequireAuth,onAccountSettings,onE
  const allowed=()=>!getSession?.()?.mfaRequired&&profile()?.admission_status==='approved'&&profile()?.status!=='banned';
  const guard=()=>({epoch,id:profile()?.id});
  const valid=g=>g.epoch===epoch&&g.id===profile()?.id;
- const notify=n=>{unread=Math.max(0,Number(n)||0);onUnreadChange?.(unread);const b=tabs?.querySelector('[data-notifications]');if(b)b.textContent=unread?`通知（${unread} 条未读）`:'通知';};
+ const notify=n=>{unread=Math.max(0,Number(n)||0);onUnreadChange?.(unread);const b=tabs?.querySelector('[data-notifications]');if(b){const full=unread?`通知（${unread} 条未读）`:'通知';b.setAttribute('aria-label',full);const long=b.querySelector('.tab-label-full'),short=b.querySelector('.tab-label-short');if(long)long.textContent=full;if(short)short.textContent=unread?`通知 ${unread}`:'通知';}};
  function msg(text,error=false){if(message){message.textContent=text;message.classList.toggle('qh-error',error);message.setAttribute('role',error?'alert':'status');}}
  function closeDialogs(){for(const d of [...dialogs])d.close();}
  function dialog(title){const d=el('dialog',undefined,'qh-community qh-dialog');d.setAttribute('aria-label',title);const close=btn('×',()=>d.close(),'qh-close');close.setAttribute('aria-label','关闭');d.append(close,el('h2',title));document.body.append(d);dialogs.add(d);d.addEventListener('close',()=>{dialogs.delete(d);d.remove();},{once:true});d.showModal();return d;}
@@ -25,7 +25,7 @@ export function initPersonal({api,getSession,onRequireAuth,onAccountSettings,onE
   if(!profile()){root.append(el('h1','个人中心'),el('p','登录后查看自己的帖子、回复和通知。'),btn('登录 / 我的账户',onRequireAuth,'primary'));return;}
   if(!allowed()){root.append(el('h1','个人中心'),el('p','请先在我的账户中完成所需验证，或查看加入申请与账户状态。'),btn('查看我的账户',onAccountSettings||onRequireAuth,'primary'));notify(0);return;}
   const p=profile(),header=el('header',undefined,'qh-page-heading'),copy=el('div');copy.append(el('p','你的社区足迹','qh-eyebrow'),el('h1',p.nickname||'社区成员'),el('p',AVATARS[p.avatar]||AVATARS.harbor,'qh-personal-avatar'));if(p.bio)copy.append(el('p',p.bio,'qh-muted'));copy.append(el('p',`加入于 ${date(p.created_at)}`,'qh-meta'));header.append(copy,row(btn('编辑资料',()=>{tab='settings';showPersonal();}),btn('公开资料预览',previewProfile)));root.append(header);
-  countHost=el('div',undefined,'qh-personal-counts');root.append(countHost);tabs=el('nav',undefined,'qh-tabs');tabs.setAttribute('aria-label','个人中心栏目');for(const [id,label] of Object.entries(TABS)){const b=btn(label,()=>{tab=id;page=0;showPersonal();},'tab');b.setAttribute('aria-pressed',String(id===tab));if(id==='notifications')b.dataset.notifications='true';tabs.append(b);}root.append(tabs);notify(unread);
+  countHost=el('div',undefined,'qh-personal-counts');root.append(countHost);tabs=el('nav',undefined,'qh-tabs');tabs.setAttribute('aria-label','个人中心栏目');for(const [id,labels] of Object.entries(TABS)){const [label,shortLabel]=labels;const b=btn('',()=>{tab=id;page=0;showPersonal();},'tab');b.setAttribute('aria-label',label);b.append(el('span',label,'tab-label-full'),el('span',shortLabel,'tab-label-short'));b.setAttribute('aria-pressed',String(id===tab));if(id==='notifications')b.dataset.notifications='true';tabs.append(b);}root.append(tabs);notify(unread);
   message=el('p','', 'qh-notice');message.setAttribute('role','status');host=el('div',undefined,'qh-personal-content');root.append(message,host);loadOverview();load();
  }
  async function loadOverview(){const g=guard(),target=countHost;try{const data=await api('personal.overview');if(!valid(g)||target!==countHost)return;const c=data.counts||{};target.replaceChildren();for(const [key,label] of [['posts','帖子'],['comments','回复'],['bookmarks','收藏'],['appeals','申诉']])target.append(el('span',`${label} ${c[key]??0}`));notify(c.unread);}catch{if(valid(g)&&target===countHost)target.textContent='概览暂不可用，可继续查看下方内容。';}}

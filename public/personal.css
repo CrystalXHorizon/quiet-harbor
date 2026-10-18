@@ -1,1 +1,32 @@
 .qh-personal-avatar{font-size:25px;line-height:1.5;margin:12px 0}.qh-personal-counts{display:flex;flex-wrap:wrap;gap:12px 28px;margin:0 0 24px;padding:18px 0;border-block:1px solid var(--line);color:var(--muted)}.qh-personal-content>.qh-post-card{margin:18px 0}.qh-personal-content>form{max-width:680px}.qh-personal-content .qh-post-body{max-height:320px;overflow:auto}.qh-personal .qh-page-heading h1{overflow-wrap:anywhere}.qh-personal .qh-page-heading .qh-muted{white-space:pre-wrap;overflow-wrap:anywhere;max-width:620px}.qh-personal-content>.qh-actions{margin-top:22px}
+.tab-label-short{display:none}
+
+/* Phone layout: six tabs as a clear 3×2 grid, four counts across, roomy fields. */
+@media(max-width:620px){
+ .qh-personal:is(section){padding:18px 16px 28px}
+ .qh-personal .qh-page-heading{flex-direction:column;align-items:flex-start;gap:10px;margin-bottom:18px}
+ .qh-personal .qh-page-heading>div,.qh-personal .qh-page-heading .qh-actions{flex:0 1 auto;min-width:0;width:100%;height:auto}
+ .qh-personal .qh-page-heading h1{font-size:23px;line-height:1.35;margin:6px 0 8px;overflow-wrap:anywhere}
+ .qh-personal .qh-page-heading .qh-muted{max-width:none;font-size:13px}
+ .qh-personal .qh-page-heading .qh-actions{margin:0;gap:8px;width:100%}
+ .qh-personal .qh-page-heading .qh-button{min-height:44px}
+ .qh-personal .qh-personal-avatar{font-size:22px;margin:8px 0}
+ .qh-personal-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px 0;margin:0 0 18px;text-align:center}
+ .qh-personal-counts>span{font-size:12px;line-height:1.4;color:var(--muted)}
+ .qh-personal .qh-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;width:100%;padding:6px}
+ .qh-personal .qh-tabs .qh-button.tab{min-height:44px;padding:8px 4px;font-size:13px;line-height:1.3;white-space:nowrap}
+ .qh-personal .qh-button{min-height:44px}
+ .qh-personal .qh-field{font-size:15px;margin:14px 0}
+ .qh-personal .qh-field input,.qh-personal .qh-field select,.qh-personal .qh-field textarea{font-size:16px;min-height:44px}
+ .qh-personal .qh-field textarea{min-height:110px}
+ .qh-personal-content>form{max-width:none}
+ .qh-personal-content>.qh-post-card{margin:14px 0}
+ .qh-personal-content .qh-post-card h2{font-size:18px}
+ .qh-personal-content .qh-post-body{font-size:16px;max-height:none}
+ .qh-personal .tab-label-short{display:inline}
+ .qh-personal .tab-label-full{display:none}
+}
+@media(max-width:359px){
+ .qh-personal-counts{grid-template-columns:repeat(2,minmax(0,1fr));text-align:left}
+ .qh-personal .qh-tabs .qh-button.tab{font-size:12px}
+}

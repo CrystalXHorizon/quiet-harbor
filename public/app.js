@@ -11,13 +11,22 @@ let history = [], pending = null, generation = 0, step = 0, started = Date.now()
 let strategyPending=null, backend=null, community=null, personal=null, currentAccountId=null, currentAccess='', currentMfa=false;
 const session=()=>backend?.getSession();
 function showView(name){
+ const moreWasOpen=$('more-dialog').open;
+ closeMore(false); closeMood(false);
+ if(name!=='chat'&&document.activeElement===$('message'))$('message').blur();
+ const mobileView=window.matchMedia('(max-width: 620px)').matches;
+ const mainEl=document.querySelector('main');
+ if(mainEl&&mobileView)mainEl.scrollTop=0;
  $('status').textContent='';
  for(const id of ['chat','community','personal','admin']){$(id+'-view').hidden=id!==name;const b=$(id+'-nav');b.classList.toggle('active',id===name);if(id===name)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');}
  $('current-view-label').textContent={chat:'与我聊聊',community:'互助社区',personal:'我的',admin:'管理后台'}[name];
+ // A more-sheet navigation action closes the sheet and then owns the focus,
+ // instead of letting the native dialog restore it to the hidden trigger.
+ if(moreWasOpen&&mobileView){const view=$(name+'-view');if(view){view.tabIndex=-1;view.focus({preventScroll:true});}}
 }
 function openPersonal(tab){if(!personal){openAccount();return;}showView('personal');void personal.showPersonal(tab);}
 function setUnread(value){const count=Number.isFinite(value)?value:0;const badge=$('notification-count');badge.hidden=count===0;badge.textContent=count>99?'99+':String(count);$('notifications-open').setAttribute('aria-label',count?`通知，${count} 条未读`:'通知');}
-function openAccount(){if(backend)backend.open();else $('status').textContent='账户功能正在加载，请稍后再试。';}
+function openAccount(){closeMore(false);if(backend)backend.open();else $('status').textContent='账户功能正在加载，请稍后再试。';}
 function onAuthChange(state){
  const id=state?.user?.id||null;
  const profile=state?.profile;
@@ -36,7 +45,7 @@ function onAuthChange(state){
 }
 
 function cancelStrategy(){strategyPending?.abort();strategyPending=null;$('strategy-generate').disabled=false;$('strategy-stop').hidden=true;}
-function openDialog(id) { const d = $(id); if (!d.open) d.showModal(); if(id==='help-dialog'){const title=$('help-title');title.tabIndex=-1;title.focus();} }
+function openDialog(id) { closeMore(false); const d = $(id); if (!d.open) d.showModal(); if(id==='help-dialog'){const title=$('help-title');title.tabIndex=-1;title.focus();} }
 function addMessage(role, text, label) {
   const row = document.createElement('article'); row.className = `message ${role}`;
   if (role !== 'user') { const img = document.createElement('img'); img.src = './favicon.svg'; img.alt = ''; img.className = 'avatar'; row.append(img); }
@@ -79,7 +88,14 @@ async function sendMessage() {
   finally { clearTimeout(timeout); if (generation === requestId) { pending = null; setBusy(false); $('message').focus(); } }
 }
 $('chat-form').addEventListener('submit', e => {e.preventDefault(); void sendMessage();});
-$('message').addEventListener('keydown', e => {if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {e.preventDefault(); void sendMessage();}});
+const coarsePointer=window.matchMedia('(pointer: coarse)');
+$('message').addEventListener('keydown', e => {
+ if(e.key!=='Enter'||e.shiftKey)return;
+ if(e.isComposing||e.keyCode===229)return;
+ // Touch keyboards keep Enter as a newline; the visible send button is the send path.
+ if(coarsePointer.matches)return;
+ e.preventDefault(); void sendMessage();
+});
 $('stop').onclick = () => {cancel(); $('status').textContent = '已停止等待回复。已预留的模型调用额度仍会计入今日用量；服务商可能已经接收了请求。';};
 $('clear').onclick = () => { resetChat(); $('status').textContent = '当前页面的对话已清空；不会删除服务商按其政策保留的请求。'; };
 $('chat-nav').onclick = () => {showView('chat');$('message').focus();};
@@ -87,7 +103,7 @@ $('community-nav').onclick=()=>{if(!community){$('status').textContent='社区�
 $('admin-nav').onclick=()=>{if(!community){$('status').textContent='管理功能正在加载，请稍后再试。';return;}showView('admin');void community.showAdmin();};
 $('personal-nav').onclick=()=>openPersonal();
 $('notifications-open').onclick=()=>openPersonal('notifications');
-$('choose-mood').onclick=()=>{$('checkin').scrollIntoView({block:'center'});$('checkin').focus({preventScroll:true});};
+$('choose-mood').onclick=openMoodPanel;
 document.querySelectorAll('[data-prompt]').forEach(b => b.onclick = () => {if (!pending) {$('message').value = b.dataset.prompt; $('message').focus();}});
 const moodSupport={
  '平稳':{comfort:'现在稍微平稳一些的话，可以在这里歇一歇，不用马上安排下一件事。',tip:'留意一件今天让你舒服些的小事，愿意的话，用一句话记下来。',strategy:7},
@@ -116,7 +132,7 @@ $('mood-listen').onclick=()=>{if(selectedMood)draftSupport(`我现在感觉${sel
 $('mood-plan').onclick=()=>{if(selectedMood)draftSupport(`我现在感觉${selectedMood}。请结合我们刚才聊的内容，和我一起找一个现在能做的小步骤；不清楚的地方可以先问我。`);};
 $('mood-practice').onclick=()=>{if(selectedMood)startGrounding(moodSupport[selectedMood].strategy);};
 function paintStep() {const s=strategies[step];$('step-title').textContent=s.title;$('step-when').textContent=s.when;$('step-text').textContent=s.body;$('step-source').href=s.source;$('step-source').textContent=s.label+' ↗';$('next-step').textContent=step===strategies.length-1?'回到第一种方法':'看看另一种';document.querySelectorAll('[data-strategy]').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===step)));}
-function startGrounding(index=0) {cancelStrategy();$('strategy-result').textContent='';step=Number.isInteger(index)&&strategies[index]?index:0; paintStep(); openDialog('ground-dialog');}
+function startGrounding(index=0) {cancelStrategy();closeMood(false);$('strategy-result').textContent='';step=Number.isInteger(index)&&strategies[index]?index:0; paintStep(); openDialog('ground-dialog');}
 document.querySelectorAll('[data-ground]').forEach(b => b.onclick=startGrounding);
 $('next-step').onclick = () => {step=(step+1)%strategies.length;paintStep();};
 strategies.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.dataset.strategy=i;b.textContent=s.title;b.onclick=()=>{step=i;paintStep();};$('strategy-options').append(b);});
@@ -147,6 +163,114 @@ $('login-from-settings').onclick=()=>{$('settings-dialog').close();openAccount()
 $('forget-legacy-key').onclick=()=>{try{localStorage.removeItem('quiet-harbor.encrypted-key.v1');$('privacy-status').textContent='已删除此设备旧版保存的加密 API Key。新版不会读取或上传它。';}catch{$('privacy-status').textContent='无法访问浏览器存储，请在浏览器设置中清除此网站数据。';}};
 window.addEventListener('pagehide',cancel);
 window.addEventListener('pageshow',e=>{if(e.persisted){resetChat();void backend?.refresh();}});
+
+/* Phone shell: the real desktop controls move between phone chrome and the more sheet.
+   Nothing is duplicated, so auth state, unread counts and handlers stay authoritative. */
+const mobileMedia=window.matchMedia('(max-width: 620px)');
+const moreDialog=$('more-dialog'),moodDialog=$('mood-dialog');
+let moreReturnFocus=true,moodReturnFocus=true;
+const helpButton=document.querySelector('.topbar [data-help]');
+const movable=[
+ {node:$('appearance-open'),mobile:()=>$('mobile-topbar-actions')},
+ {node:$('notifications-open'),mobile:()=>$('more-account-list')},
+ {node:$('account-open'),mobile:()=>$('more-account-list')},
+ {node:helpButton,mobile:()=>$('mobile-topbar-actions')},
+ {node:$('chat-nav'),mobile:()=>$('mobile-slot-chat')},
+ {node:$('community-nav'),mobile:()=>$('mobile-slot-community')},
+ {node:$('personal-nav'),mobile:()=>$('mobile-slot-personal')},
+ {node:$('admin-nav'),mobile:()=>$('more-account-list')},
+ {node:$('settings-open'),mobile:()=>$('more-tools')},
+ {node:$('about-open'),mobile:()=>$('more-tools')},
+ {node:$('checkin'),mobile:()=>$('mood-dialog-body')}
+];
+const movedNodes=new Set(movable.map(item=>item.node));
+for(const item of movable)item.home={parent:item.node.parentElement,next:item.node.nextSibling};
+let mobileShell=mobileMedia.matches?null:false;
+function orderMobileShell(){
+ $('mobile-topbar-actions').append($('appearance-open'),helpButton);
+ $('more-account-list').append($('account-open'),$('notifications-open'),$('admin-nav'));
+ $('more-tools').append($('settings-open'),$('about-open'));
+}
+function restoreDesktopShell(){
+ for(const item of [...movable].reverse()){const {parent,next}=item.home;if(next&&next.parentNode===parent)parent.insertBefore(item.node,next);else parent.appendChild(item.node);}
+}
+function setMobileTabLabels(mobile){
+ for(const [id,label] of [['chat-nav','聊聊'],['community-nav','社区'],['personal-nav','我的']]){const b=$(id);if(mobile)b.setAttribute('aria-label',label);else b.removeAttribute('aria-label');}
+}
+function applyMobileShell(){
+ const mobile=mobileMedia.matches;
+ if(mobile===mobileShell)return;
+ const active=document.activeElement;
+ closeMore(false);closeMood(false);
+ if(mobile){
+  for(const item of movable)item.mobile().append(item.node);
+  orderMobileShell();setMobileTabLabels(true);
+ }else{
+  restoreDesktopShell();setMobileTabLabels(false);
+ }
+ mobileShell=mobile;
+ document.documentElement.classList.toggle('mobile-shell',mobile);
+ if(mobile)syncViewport();else clearKeyboardLayout();
+ if(active&&movedNodes.has(active)&&active.isConnected){
+  // Let the breakpoint styles and the new slot layout settle before restoring focus,
+  // otherwise focus() can run while the destination slot is still display:none.
+  requestAnimationFrame(()=>{if(active.isConnected)active.focus({preventScroll:true});});
+ }
+}
+function openMore(){if(!mobileMedia.matches)return;moreReturnFocus=true;if(!moreDialog.open)moreDialog.showModal();}
+function closeMore(returnFocus=true){moreReturnFocus=returnFocus;if(moreDialog.open)moreDialog.close();}
+function closeMood(returnFocus=true){moodReturnFocus=returnFocus;if(moodDialog.open)moodDialog.close();}
+function openMoodPanel(){
+ if(!mobileMedia.matches){$('checkin').scrollIntoView({block:'center'});$('checkin').focus({preventScroll:true});return;}
+ closeMore(false);moodReturnFocus=true;
+ if($('checkin').parentElement!==$('mood-dialog-body'))$('mood-dialog-body').append($('checkin'));
+ if(!moodDialog.open)moodDialog.showModal();
+ setTimeout(()=>{if(moodDialog.open)$('checkin').focus({preventScroll:true});},0);
+}
+const viewport=window.visualViewport;
+function clearKeyboardLayout(){
+ document.documentElement.classList.remove('keyboard-open');
+ document.documentElement.style.removeProperty('--app-height');
+ document.documentElement.style.removeProperty('--vv-offset-top');
+}
+function syncViewport(){
+ if(!mobileMedia.matches){clearKeyboardLayout();return;}
+ const height=Math.round((viewport?.height)||window.innerHeight)||window.innerHeight;
+ const visualOffset=Math.max(0,Math.round(viewport?.offsetTop||0));
+ const focused=document.activeElement;
+ const editing=Boolean(focused&&(focused.tagName==='TEXTAREA'||focused.tagName==='INPUT'||focused.tagName==='SELECT'||focused.isContentEditable));
+ const compact=editing&&(window.innerHeight-height>120||window.innerHeight<=520);
+ // A panned visual viewport (notably iOS with the keyboard open) must keep the
+ // fixed bars and the composer inside the visible area, not just the height.
+ const offset=compact?visualOffset:0;
+ document.documentElement.style.setProperty('--app-height',(height+offset)+'px');
+ document.documentElement.style.setProperty('--vv-offset-top',offset+'px');
+ document.documentElement.classList.toggle('keyboard-open',compact);
+ if(compact)requestAnimationFrame(()=>$('chat-form').scrollIntoView({block:'nearest'}));
+}
+$('more-open').onclick=openMore;
+$('more-close').onclick=()=>closeMore();
+moreDialog.addEventListener('close',()=>{
+ // Only an ordinary cancel/close restores the trigger. Actions such as opening
+ // settings or account keep the focus destination chosen by that action.
+ const restore=moreReturnFocus;moreReturnFocus=true;
+ if(restore&&mobileMedia.matches&&$('more-open').isConnected)$('more-open').focus({preventScroll:true});
+});
+moodDialog.addEventListener('close',()=>{
+ const restore=moodReturnFocus;moodReturnFocus=true;
+ if(restore&&mobileMedia.matches&&!$('chat-view').hidden)$('choose-mood').focus({preventScroll:true});
+});
+moreDialog.addEventListener('click',event=>{if(event.target.closest('a'))closeMore(false);});
+mobileMedia.addEventListener('change',applyMobileShell);
+window.addEventListener('resize',applyMobileShell);
+window.addEventListener('resize',syncViewport);
+viewport?.addEventListener('resize',syncViewport);
+viewport?.addEventListener('scroll',syncViewport);
+document.addEventListener('focusin',syncViewport);
+document.addEventListener('focusout',()=>setTimeout(syncViewport,0));
+$('message').addEventListener('focus',()=>{if(mobileMedia.matches)setTimeout(()=>{$('chat-form').scrollIntoView({block:'nearest'});syncViewport();},260);});
+window.addEventListener('pagehide',clearKeyboardLayout);
+applyMobileShell();syncViewport();
 // No chat-reading or chat-sending agent tool is exposed; only the visible grounding flow.
 if (document.modelContext?.registerTool) {
   const lifecycle=new AbortController();

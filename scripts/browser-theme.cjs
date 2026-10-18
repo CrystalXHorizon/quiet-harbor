@@ -26,7 +26,7 @@ async function readable(page, selector) {
 }
 async function main() {
   await fs.mkdir(output, {recursive: true});
-  const browser = await chromium.launch({headless: true});
+  const browser = await chromium.launch({headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   try {
     const context = await browser.newContext({colorScheme: 'light', viewport: {width: 1280, height: 960}});
     await context.route('**/site-config.json', route => route.fulfill({contentType: 'application/json', body: JSON.stringify({supabaseUrl: 'https://quiet-harbor-qa.supabase.co', supabaseAnonKey: 'sb_publishable_browser_qa_fixture'})}));
